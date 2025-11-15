@@ -27,7 +27,7 @@ The turn tracker leverages popular community plugins and themes for its function
 	- Make sure `User Scripts/Script files folder location` is set to a different folder in your vault.
 - **Meta-Bind** - *required for buttons and input fields*
 	- JavaScript must be enabled in Settings
-	- **JS Engine** - *required for running JavaScript from Meta-Bind buttons*
+- **JS Engine** - *required for running JavaScript from Meta-Bind buttons*
 - (Optional) **Calendarium** – *optional for adding custom calendar formatting via the Calendarium API*. The turn tracker will display your fantasy weekday, day number, and month names instead of real-world dates.
 
 ## Setup
