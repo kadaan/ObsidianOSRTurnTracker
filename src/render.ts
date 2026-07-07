@@ -1,5 +1,5 @@
 import { setIcon } from "obsidian";
-import { DEFAULT_ADVANCE_SHORTCUTS, DEFAULT_LIGHT_PRESETS, TrackerState } from "./model";
+import { DEFAULT_ADVANCE_SHORTCUTS, DEFAULT_LIGHT_PRESETS, MarkerKind, TrackerState } from "./model";
 import { computeGrid } from "./grid";
 
 export interface TrackerHandlers {
@@ -7,6 +7,10 @@ export interface TrackerHandlers {
   onAdvanceHours: (hours: number) => void;
   onBoxClick: (turn: number) => void;
   onLight: (preset: string, turns: number) => void;
+  onAddEffect: () => void;
+  onClearExpired: () => void;
+  onClearAll: () => void;
+  onRemoveMarker: (kind: MarkerKind, key: string, expiresAt: number) => void;
 }
 
 /**
@@ -55,11 +59,16 @@ export function renderTracker(
           attr: handlers ? { "data-turn": box.turn } : undefined,
         });
         for (const chip of box.markers) {
-          const chipEl = boxes.createSpan({
-            cls: "osr-tt-chip",
-            text: chip.count > 1 ? `${chip.label}${chip.count}` : chip.label,
-          });
+          const chipEl = boxes.createSpan({ cls: "osr-tt-chip" });
           chipEl.toggleClass("is-expired", chip.expired);
+          chipEl.createSpan({ text: chip.count > 1 ? `${chip.label}${chip.count}` : chip.label });
+          if (handlers) {
+            chipEl
+              .createSpan({ cls: "osr-tt-chip-x", text: "×" })
+              .addEventListener("click", () =>
+                handlers.onRemoveMarker(chip.kind, chip.key, chip.expiresAt),
+              );
+          }
         }
       }
     }
@@ -78,6 +87,9 @@ function renderControls(root: HTMLElement, handlers: TrackerHandlers): void {
   for (const preset of DEFAULT_LIGHT_PRESETS) {
     addButton(preset.label, () => handlers.onLight(preset.id, preset.turns));
   }
+  addButton("+ Effect", handlers.onAddEffect);
+  addButton("Clear expired", handlers.onClearExpired);
+  addButton("Clear all", handlers.onClearAll);
 }
 
 /** Render a parse/validation error inline, keeping the note responsive. */

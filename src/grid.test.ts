@@ -74,7 +74,9 @@ describe("computeGrid", () => {
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
 
-    expect(boxes[5].markers).toEqual([{ label: "T", count: 1, expired: false }]);
+    expect(boxes[5].markers).toEqual([
+      { label: "T", count: 1, expired: false, kind: "light", key: "torch", expiresAt: 6 },
+    ]);
     expect(boxes[6].markers).toEqual([]);
   });
 
@@ -101,7 +103,9 @@ describe("computeGrid", () => {
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
 
-    expect(boxes[5].markers).toEqual([{ label: "T", count: 2, expired: false }]);
+    expect(boxes[5].markers).toEqual([
+      { label: "T", count: 2, expired: false, kind: "light", key: "torch", expiresAt: 6 },
+    ]);
   });
 
   it("keeps different glyphs on the same turn as separate chips", () => {
@@ -132,6 +136,20 @@ describe("computeGrid", () => {
     expect(days).toHaveLength(2);
     const boxes = days.flatMap((d) => d.hours.flatMap((h) => h.boxes));
     expect(boxes[199].markers).toHaveLength(1); // chip on the last lit turn (expiresAt - 1)
+  });
+
+  it("places an effect chip at its last lit turn, using the effect label as the glyph", () => {
+    const state: TrackerState = {
+      position: 0,
+      lights: [],
+      effects: [{ label: "Pn", expiresAt: 4 }],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[3].markers).toEqual([
+      { label: "Pn", count: 1, expired: false, kind: "effect", key: "Pn", expiresAt: 4 },
+    ]);
   });
 
   it("labels hour rows 00:00 through 23:00", () => {

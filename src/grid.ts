@@ -4,20 +4,25 @@ import {
   MINUTES_PER_TURN,
   HOURS_PER_DAY,
   TURNS_PER_DAY,
-  DEFAULT_LIGHT_PRESETS,
+  lightGlyph,
   LOOKAHEAD_BUFFER,
   MAX_POSITION,
+  MarkerKind,
 } from "./model";
 
 export type BoxStatus = "past" | "current" | "future";
 
 /** A marker rendered on the box at its expiry turn. */
 export interface MarkerChip {
-  /** Glyph, e.g. "T". */
+  /** Display glyph, e.g. "T". */
   label: string;
-  /** How many same-label markers expire on this turn (rendered as "T2" when > 1). */
+  /** How many identical markers expire on this turn (rendered as "T2" when > 1). */
   count: number;
   expired: boolean;
+  /** Removal identity: which list, its key (preset id / effect label), and expiry turn. */
+  kind: MarkerKind;
+  key: string;
+  expiresAt: number;
 }
 
 export interface Box {
@@ -46,25 +51,38 @@ export interface DayBlock {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** Shared empty markers list for the many marker-less boxes (never mutated). */
+const NO_CHIPS: MarkerChip[] = [];
+
 /** Clock time (e.g. "02:20") for a number of turns into a day. */
 const formatClock = (turnsIntoDay: number): string =>
   `${pad(Math.floor(turnsIntoDay / TURNS_PER_HOUR))}:${pad((turnsIntoDay % TURNS_PER_HOUR) * MINUTES_PER_TURN)}`;
 
 /** Group markers by expiry turn, keyed for quick per-box lookup. */
 function placeMarkers(state: TrackerState): Map<number, MarkerChip[]> {
-  const glyph = (id: string) => DEFAULT_LIGHT_PRESETS.find((p) => p.id === id)?.marker ?? "?";
-  const byTurn = new Map<number, MarkerChip[]>();
+  const marks = [
+    ...state.lights.map((l) => ({ label: lightGlyph(l.preset), kind: "light" as const, key: l.preset, expiresAt: l.expiresAt })),
+    ...state.effects.map((e) => ({ label: e.label, kind: "effect" as const, key: e.label, expiresAt: e.expiresAt })),
+  ];
 
-  for (const light of state.lights) {
-    const label = glyph(light.preset);
-    // The chip sits on the light's last lit turn; it goes out on the next.
-    const chipTurn = light.expiresAt - 1;
+  const byTurn = new Map<number, MarkerChip[]>();
+  for (const mark of marks) {
+    // The chip sits on the marker's last lit turn; it goes out on the next.
+    const chipTurn = mark.expiresAt - 1;
     const chips = byTurn.get(chipTurn) ?? [];
-    const existing = chips.find((c) => c.label === label);
+    // Group by removal identity, so a light and an effect sharing a glyph stay separate.
+    const existing = chips.find((c) => c.kind === mark.kind && c.key === mark.key);
     if (existing) {
       existing.count += 1;
     } else {
-      chips.push({ label, count: 1, expired: state.position >= light.expiresAt });
+      chips.push({
+        label: mark.label,
+        count: 1,
+        expired: state.position >= mark.expiresAt,
+        kind: mark.kind,
+        key: mark.key,
+        expiresAt: mark.expiresAt,
+      });
     }
     byTurn.set(chipTurn, chips);
   }
@@ -90,7 +108,7 @@ export function computeGrid(state: TrackerState): DayBlock[] {
         const turn = day * TURNS_PER_DAY + hourOfDay * TURNS_PER_HOUR + t;
         const status: BoxStatus =
           turn < state.position ? "past" : turn === state.position ? "current" : "future";
-        boxes.push({ turn, status, markers: chipsByTurn.get(turn) ?? [] });
+        boxes.push({ turn, status, markers: chipsByTurn.get(turn) ?? NO_CHIPS });
       }
       hours.push({ label: `${pad(hourOfDay)}:00`, boxes });
     }

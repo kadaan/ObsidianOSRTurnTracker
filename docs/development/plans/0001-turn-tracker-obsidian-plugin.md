@@ -148,12 +148,12 @@ marker (decrementing a stack, `T2` → `T`). Add **Clear expired** (drop markers
 
 ### Acceptance criteria
 
-- [ ] The Add-Effect modal validates label + turn count and adds a chip at
-      `position + turns`.
-- [ ] A chip's `×` removes exactly one marker; on a stacked chip it decrements the
-      count rather than clearing the group.
-- [ ] "Clear expired" removes only markers at/behind `position`; "Clear all" empties
-      both marker lists.
+- [~] The Add-Effect modal validates label + turn count and adds a chip at
+      `position + turns`. *(`addEffect` placement unit-tested; modal + validation need a manual pass.)*
+- [~] A chip's `×` removes exactly one marker; on a stacked chip it decrements the
+      count rather than clearing the group. *(`removeMarker` fully unit-tested — decrement, effect, glyph-collision, no-match; the `×` wiring needs a manual pass.)*
+- [x] "Clear expired" removes only markers at/behind `position`; "Clear all" empties
+      both marker lists. *(Both unit-tested; buttons are trivial wiring.)*
 
 ---
 

@@ -1,13 +1,25 @@
 import {
+  App,
   Editor,
   MarkdownPostProcessorContext,
+  Modal,
   Notice,
   Plugin,
+  Setting,
   TFile,
 } from "obsidian";
 import { parseTrackerState } from "./parse";
 import { renderError, renderTracker } from "./render";
-import { advanceHours, endTurn, lightSource, toggleAt } from "./actions";
+import {
+  addEffect,
+  advanceHours,
+  clearAll,
+  clearExpired,
+  endTurn,
+  lightSource,
+  removeMarker,
+  toggleAt,
+} from "./actions";
 import { applyTrackerAction } from "./apply";
 import { BlockRange, findTrackerBlockAt } from "./block";
 import { DEFAULT_ADVANCE_SHORTCUTS, TRACKER_LANG, Transform } from "./model";
@@ -29,6 +41,14 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
         onLight: (preset, turns) => void this.mutateFromWidget(el, ctx, lightSource(preset, turns)),
+        onAddEffect: () =>
+          new EffectModal(this.app, (label, turns) =>
+            void this.mutateFromWidget(el, ctx, addEffect(label, turns)),
+          ).open(),
+        onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
+        onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
+        onRemoveMarker: (kind, key, expiresAt) =>
+          void this.mutateFromWidget(el, ctx, removeMarker(kind, key, expiresAt)),
       });
     });
 
@@ -94,5 +114,48 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     } finally {
       this.applying = false;
     }
+  }
+}
+
+/** Prompts for an ad-hoc effect's label and duration, then invokes `onSubmit`. */
+class EffectModal extends Modal {
+  private label = "";
+  private turns = "1";
+
+  constructor(
+    app: App,
+    private readonly onSubmit: (label: string, turns: number) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.createEl("h3", { text: "Add effect" });
+
+    new Setting(this.contentEl).setName("Label").addText((t) =>
+      t.setPlaceholder("e.g. Poison").onChange((v) => (this.label = v.trim())),
+    );
+    new Setting(this.contentEl).setName("Duration (turns)").addText((t) => {
+      t.inputEl.type = "number";
+      t.inputEl.min = "1";
+      t.setValue(this.turns).onChange((v) => (this.turns = v));
+    });
+    new Setting(this.contentEl).addButton((b) =>
+      b.setButtonText("Add").setCta().onClick(() => this.submit()),
+    );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private submit(): void {
+    const turns = Number(this.turns);
+    if (!this.label || !Number.isInteger(turns) || turns < 1) {
+      new Notice("Enter a label and a whole number of turns ≥ 1.");
+      return;
+    }
+    this.onSubmit(this.label, turns);
+    this.close();
   }
 }

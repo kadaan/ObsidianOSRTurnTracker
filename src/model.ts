@@ -24,6 +24,13 @@ export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
 /** Turns rendered past the furthest marker/position, for look-ahead. A setting later. */
 export const LOOKAHEAD_BUFFER = 6;
 
+/** The chip glyph for a light preset id (falls back to "?" for an unknown preset). */
+export const lightGlyph = (presetId: string): string =>
+  DEFAULT_LIGHT_PRESETS.find((p) => p.id === presetId)?.marker ?? "?";
+
+/** Which marker list a chip came from — its removal target. */
+export type MarkerKind = "light" | "effect";
+
 /** A turn is 10 minutes; these are enforced constants, never configurable. */
 export const TURNS_PER_HOUR = 6;
 export const MINUTES_PER_TURN = 60 / TURNS_PER_HOUR; // 10
