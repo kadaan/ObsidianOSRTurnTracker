@@ -1,0 +1,60 @@
+/* OSR Turn Tracker — self-contained styles, no theme dependency. */
+
+.osr-tt {
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+
+.osr-tt-day {
+  margin-bottom: 0.75em;
+}
+
+.osr-tt-day-header {
+  font-weight: var(--font-semibold);
+  margin-bottom: 0.35em;
+  padding-bottom: 0.15em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.osr-tt-hour {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 1px 0;
+}
+
+.osr-tt-hour-label {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+  min-width: 3.2em;
+  text-align: right;
+}
+
+.osr-tt-boxes {
+  display: flex;
+  gap: 4px;
+}
+
+.osr-tt-box {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--text-muted);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.osr-tt-box.is-ticked {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.osr-tt-error {
+  color: var(--text-error);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+  padding: 0.4em 0.6em;
+  border: 1px solid var(--background-modifier-error-border, var(--text-error));
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-error, transparent);
+}

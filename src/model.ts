@@ -1,0 +1,37 @@
+/** Core domain model for the OSR Turn Tracker. */
+
+/** A turn is 10 minutes; these are enforced constants, never configurable. */
+export const TURNS_PER_HOUR = 6;
+export const HOURS_PER_DAY = 24;
+export const TURNS_PER_DAY = TURNS_PER_HOUR * HOURS_PER_DAY; // 144
+
+/**
+ * Upper bound on `position`, guarding against a hand-entered value that would
+ * render millions of boxes and freeze the renderer. A year of in-game time is a
+ * generous ceiling for a per-session tracker.
+ */
+export const MAX_POSITION = 366 * TURNS_PER_DAY;
+
+/** A light source, driven by a preset. Its expiry is an absolute turn index. */
+export interface Light {
+  preset: string;
+  expiresAt: number;
+}
+
+/** An ad-hoc timed effect with a free-text label. Expiry is an absolute turn index. */
+export interface Effect {
+  label: string;
+  expiresAt: number;
+}
+
+/** The full state of a tracker, as stored in a `turn-tracker` code block. */
+export interface TrackerState {
+  /** ISO datetime the tracker starts at; absent means Day-N mode from turn 0. */
+  start?: string;
+  /** Calendarium calendar name; absent means no fantasy calendar. */
+  calendar?: string;
+  /** Turns elapsed since start. Boxes [0, position) are ticked. */
+  position: number;
+  lights: Light[];
+  effects: Effect[];
+}

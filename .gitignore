@@ -1,1 +1,10 @@
+.devbox/
 .obsidian/
+
+# npm / build
+node_modules/
+main.js
+main.js.map
+
+# test / coverage
+coverage/
