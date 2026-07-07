@@ -83,6 +83,11 @@ details.osr-tt-panel-section > summary.osr-tt-panel-title {
   cursor: pointer;
 }
 
+/* Expired effects are spent history — dim their rows. */
+.osr-tt-panel-section.is-expired .osr-tt-effect {
+  opacity: 0.55;
+}
+
 .osr-tt-effect {
   display: flex;
   align-items: center;
@@ -164,6 +169,48 @@ input.osr-tt-effect-name-edit {
   color: var(--text-muted);
   min-width: 2em;
   text-align: right;
+}
+
+/* The turns-left number is click-to-edit, like the name: pointer + accent outline on hover. */
+.osr-tt-effect-time.is-editable {
+  cursor: pointer;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+}
+
+.osr-tt-effect-time.is-editable:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-form-field, var(--background-primary));
+}
+
+input.osr-tt-effect-time-edit {
+  box-sizing: border-box;
+  width: 3.5em;
+  height: 1.6em;
+  margin: 0;
+  padding: 0 2px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  text-align: right;
+}
+
+.osr-tt-effect-play {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.osr-tt-effect-play:hover {
+  color: var(--interactive-accent);
+}
+
+.osr-tt-effect-play .svg-icon {
+  width: 0.9em;
+  height: 0.9em;
 }
 
 .osr-tt-chip-x {

@@ -1,4 +1,4 @@
-import { MINUTES_PER_TURN, TrackerState, TURNS_PER_DAY, TURNS_PER_HOUR } from "./model";
+import { dayOf, MINUTES_PER_TURN, TrackerState, TURNS_PER_DAY, TURNS_PER_HOUR } from "./model";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -16,7 +16,6 @@ export function formatSpan(
   expiresAt: number,
   dayLabel: (dayIndex: number) => string,
 ): string {
-  const dayOf = (turn: number) => Math.floor(turn / TURNS_PER_DAY);
   const clockOf = (turn: number) => formatClock(((turn % TURNS_PER_DAY) + TURNS_PER_DAY) % TURNS_PER_DAY);
   const crossesDays = dayOf(startsAt) !== dayOf(expiresAt);
   const at = (turn: number) => (crossesDays ? `${dayLabel(dayOf(turn))} ${clockOf(turn)}` : clockOf(turn));

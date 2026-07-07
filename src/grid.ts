@@ -5,8 +5,10 @@ import {
   TURNS_PER_DAY,
   LOOKAHEAD_BUFFER,
   MAX_POSITION,
+  dayOf,
 } from "./model";
 import { makeDayHeader, formatClock } from "./dates";
+import { resolveMarker, inSegments } from "./markers";
 
 export interface GridOptions {
   lookaheadBuffer?: number;
@@ -53,25 +55,33 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
 
   const days: DayBlock[] = [];
 
-  // Non-pending markers (already lit) drive the horizon and the per-box start/end counts.
-  // Pending markers (startsAt in the future, only reachable by rewinding) are excluded.
-  const live = [...state.lights, ...state.effects].filter((m) => state.position >= (m.startsAt ?? 0));
+  // Resolve every marker's burn state (honouring pauses); pending markers (startsAt in the
+  // future, only reachable by rewinding) are excluded. Each active burn segment paints a span;
+  // a paused marker's span stops at the pause and contributes no ending marker.
+  const resolved = [...state.lights, ...state.effects]
+    .map((m) => resolveMarker(m, state.position))
+    .filter((r) => r.phase !== "upcoming");
+  const segments = resolved.flatMap((r) => r.segments);
+
   const startsOn = new Map<number, number>();
   const endsOn = new Map<number, number>();
-  for (const m of live) {
-    startsOn.set(m.startsAt ?? 0, (startsOn.get(m.startsAt ?? 0) ?? 0) + 1);
-    endsOn.set(m.expiresAt - 1, (endsOn.get(m.expiresAt - 1) ?? 0) + 1);
+  for (const r of resolved) {
+    for (const [from] of r.segments) startsOn.set(from, (startsOn.get(from) ?? 0) + 1);
+    if (r.phase !== "paused") endsOn.set(r.expiresAt - 1, (endsOn.get(r.expiresAt - 1) ?? 0) + 1);
   }
 
-  // Render whole days through the furthest of (position, any live marker expiry) + buffer,
+  // Render whole days through the furthest of (position, any active-segment end) + buffer,
   // clamped so a hand-edited huge expiry can't explode the grid.
   const horizon = Math.min(
-    Math.max(state.position, ...live.map((m) => m.expiresAt)) + buffer,
+    Math.max(state.position, ...segments.map(([, to]) => to)) + buffer,
     MAX_POSITION,
   );
-  const dayCount = Math.floor(horizon / TURNS_PER_DAY) + 1;
+  const dayCount = dayOf(horizon) + 1;
 
-  for (let day = 0; day < dayCount; day++) {
+  // Skip whole days before the origin's day (used when cloning a session into a fresh note).
+  const originDay = Math.min(dayOf(state.origin ?? 0), dayCount - 1);
+
+  for (let day = originDay; day < dayCount; day++) {
     const hours: HourRow[] = [];
     for (let hourOfDay = 0; hourOfDay < HOURS_PER_DAY; hourOfDay++) {
       const boxes: Box[] = [];
@@ -84,7 +94,7 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
           status,
           startingCount: startsOn.get(turn) ?? 0,
           endingCount: endsOn.get(turn) ?? 0,
-          spanned: live.some((m) => (m.startsAt ?? 0) <= turn && turn < m.expiresAt),
+          spanned: inSegments(segments, turn),
         });
       }
       hours.push({ label: `${pad(hourOfDay)}:00`, boxes });

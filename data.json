@@ -4,13 +4,15 @@
       "id": "torch",
       "label": "Torch",
       "marker": "T",
-      "turns": 6
+      "turns": 6,
+      "pausable": true
     },
     {
       "id": "lantern",
       "label": "Lantern",
       "marker": "L",
-      "turns": 24
+      "turns": 24,
+      "pausable": true
     }
   ],
   "advanceShortcuts": [

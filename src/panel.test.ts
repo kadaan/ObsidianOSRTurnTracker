@@ -6,7 +6,7 @@ describe("computeEffectPanel", () => {
   it("lists an active marker as a row with progress and turns remaining", () => {
     const state: TrackerState = {
       position: 12,
-      lights: [{ preset: "torch", startsAt: 10, expiresAt: 16 }],
+      lights: [{ preset: "torch", startsAt: 10, duration: 6 }],
       effects: [],
     };
 
@@ -19,16 +19,16 @@ describe("computeEffectPanel", () => {
       index: 0,
       label: "Torch", // the preset's display name, not its glyph
       startsAt: 10,
-      expiresAt: 16,
+      expiresAt: 16, // effective expiry (start + duration)
       remaining: 4, // 16 - 12
     });
-    expect(active[0].progress).toBeCloseTo((12 - 10) / (16 - 10)); // 2/6
+    expect(active[0].progress).toBeCloseTo((12 - 10) / 6); // 2/6
   });
 
   it("puts a marker at/past its expiry in the expired list", () => {
     const state: TrackerState = {
       position: 20,
-      lights: [{ preset: "torch", startsAt: 10, expiresAt: 16 }],
+      lights: [{ preset: "torch", startsAt: 10, duration: 6 }],
       effects: [],
     };
 
@@ -42,7 +42,7 @@ describe("computeEffectPanel", () => {
   it("clamps turns-remaining to zero for an expired marker", () => {
     const state: TrackerState = {
       position: 20,
-      lights: [{ preset: "torch", startsAt: 10, expiresAt: 16 }],
+      lights: [{ preset: "torch", startsAt: 10, duration: 6 }],
       effects: [],
     };
 
@@ -52,7 +52,7 @@ describe("computeEffectPanel", () => {
   it("lists a pending marker (rewound before it was lit) under upcoming", () => {
     const state: TrackerState = {
       position: 5,
-      lights: [{ preset: "torch", startsAt: 10, expiresAt: 16 }],
+      lights: [{ preset: "torch", startsAt: 10, duration: 6 }],
       effects: [],
     };
 
@@ -68,8 +68,8 @@ describe("computeEffectPanel", () => {
     const state: TrackerState = {
       position: 8,
       lights: [
-        { preset: "torch", startsAt: 0, expiresAt: 10 },
-        { preset: "torch", startsAt: 5, expiresAt: 15 },
+        { preset: "torch", startsAt: 0, duration: 10 },
+        { preset: "torch", startsAt: 5, duration: 10 },
       ],
       effects: [],
     };
@@ -86,8 +86,8 @@ describe("computeEffectPanel", () => {
     const state: TrackerState = {
       position: 12,
       lights: [
-        { preset: "torch", startsAt: 10, expiresAt: 16 },
-        { preset: "torch", startsAt: 10, expiresAt: 16 },
+        { preset: "torch", startsAt: 10, duration: 6 },
+        { preset: "torch", startsAt: 10, duration: 6 },
       ],
       effects: [],
     };
@@ -101,8 +101,8 @@ describe("computeEffectPanel", () => {
     const state: TrackerState = {
       position: 12, // first torch (expires 10) is gone; second (expires 15) still lit
       lights: [
-        { preset: "torch", startsAt: 0, expiresAt: 10 },
-        { preset: "torch", startsAt: 5, expiresAt: 15 },
+        { preset: "torch", startsAt: 0, duration: 10 },
+        { preset: "torch", startsAt: 5, duration: 10 },
       ],
       effects: [],
     };
@@ -118,8 +118,8 @@ describe("computeEffectPanel", () => {
       position: 30,
       lights: [],
       effects: [
-        { label: "Zeta", startsAt: 10, expiresAt: 40 }, // source index 0
-        { label: "Alpha", startsAt: 10, expiresAt: 40 }, // source index 1
+        { label: "Zeta", startsAt: 10, duration: 30 }, // source index 0
+        { label: "Alpha", startsAt: 10, duration: 30 }, // source index 1
       ],
     };
 
@@ -133,7 +133,7 @@ describe("computeEffectPanel", () => {
   it("shows a light's custom label as its name instead of the preset default", () => {
     const state: TrackerState = {
       position: 2,
-      lights: [{ preset: "torch", label: "Aragorn's torch", startsAt: 0, expiresAt: 6 }],
+      lights: [{ preset: "torch", label: "Aragorn's torch", startsAt: 0, duration: 6 }],
       effects: [],
     };
 
@@ -146,8 +146,8 @@ describe("computeEffectPanel", () => {
     const state: TrackerState = {
       position: 8,
       lights: [
-        { preset: "torch", startsAt: 0, expiresAt: 10 },
-        { preset: "torch", startsAt: 5, expiresAt: 15 },
+        { preset: "torch", startsAt: 0, duration: 10 },
+        { preset: "torch", startsAt: 5, duration: 10 },
       ],
       effects: [],
     };
@@ -158,14 +158,41 @@ describe("computeEffectPanel", () => {
     expect(active.map((r) => r.name)).toEqual(["Torch", "Torch"]);
   });
 
+  it("puts a paused light in the paused list with frozen remaining and a truncated span", () => {
+    const state: TrackerState = {
+      position: 20,
+      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
+      effects: [],
+    };
+
+    const { active, paused } = computeEffectPanel(state);
+
+    expect(active).toEqual([]);
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatchObject({ remaining: 3, segments: [[0, 3]] });
+  });
+
+  it("flags lights whose preset is pausable, but never effects", () => {
+    const state: TrackerState = {
+      position: 2,
+      lights: [{ preset: "torch", startsAt: 0, duration: 6 }],
+      effects: [{ label: "Poison", startsAt: 0, duration: 6 }],
+    };
+
+    const { active } = computeEffectPanel(state);
+
+    expect(active.find((r) => r.kind === "light")?.pausable).toBe(true);
+    expect(active.find((r) => r.kind === "effect")?.pausable).toBe(false);
+  });
+
   it("sorts each list ascending by start, then by name", () => {
     const state: TrackerState = {
       position: 30,
       lights: [],
       effects: [
-        { label: "Web", startsAt: 20, expiresAt: 40 },
-        { label: "Bless", startsAt: 20, expiresAt: 40 },
-        { label: "Haste", startsAt: 10, expiresAt: 40 },
+        { label: "Web", startsAt: 20, duration: 20 },
+        { label: "Bless", startsAt: 20, duration: 20 },
+        { label: "Haste", startsAt: 10, duration: 30 },
       ],
     };
 
@@ -179,8 +206,8 @@ describe("computeEffectPanel", () => {
       position: 20,
       lights: [],
       effects: [
-        { label: "Web", startsAt: 10, expiresAt: 22 },
-        { label: "Web", startsAt: 18, expiresAt: 22 },
+        { label: "Web", startsAt: 10, duration: 12 },
+        { label: "Web", startsAt: 18, duration: 4 },
       ],
     };
 

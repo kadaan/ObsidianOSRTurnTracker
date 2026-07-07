@@ -69,7 +69,7 @@ describe("computeGrid", () => {
     // a lantern lit at turn 0, expiring at 200 (day 2), pulls day 2 into view
     const state: TrackerState = {
       position: 0,
-      lights: [{ preset: "lantern", startsAt: 0, expiresAt: 200 }],
+      lights: [{ preset: "lantern", startsAt: 0, duration: 200 }],
       effects: [],
     };
 
@@ -80,7 +80,7 @@ describe("computeGrid", () => {
     // position 0 but the lantern starts at turn 200 — not lit yet, so it shouldn't extend the grid
     const state: TrackerState = {
       position: 0,
-      lights: [{ preset: "lantern", startsAt: 200, expiresAt: 224 }],
+      lights: [{ preset: "lantern", startsAt: 200, duration: 24 }],
       effects: [],
     };
 
@@ -91,8 +91,8 @@ describe("computeGrid", () => {
     const state: TrackerState = {
       position: 10,
       lights: [
-        { preset: "torch", startsAt: 4, expiresAt: 10 },
-        { preset: "torch", startsAt: 4, expiresAt: 10 },
+        { preset: "torch", startsAt: 4, duration: 6 },
+        { preset: "torch", startsAt: 4, duration: 6 },
       ],
       effects: [],
     };
@@ -107,7 +107,7 @@ describe("computeGrid", () => {
   it("flags boxes within a live marker's span", () => {
     const state: TrackerState = {
       position: 10,
-      lights: [{ preset: "torch", startsAt: 4, expiresAt: 8 }],
+      lights: [{ preset: "torch", startsAt: 4, duration: 4 }],
       effects: [],
     };
 
@@ -117,6 +117,54 @@ describe("computeGrid", () => {
     expect(boxes[4].spanned).toBe(true); // start
     expect(boxes[7].spanned).toBe(true); // last active turn (expiresAt - 1)
     expect(boxes[8].spanned).toBe(false); // expiresAt (goes out) is outside the span
+  });
+
+  it("truncates a paused light's span at the pause and drops its ending marker", () => {
+    const state: TrackerState = {
+      position: 5,
+      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
+      effects: [],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[2].spanned).toBe(true); // burning before the pause
+    expect(boxes[3].spanned).toBe(false); // paused at 3 → no longer active
+    expect(boxes.some((b) => b.endingCount > 0)).toBe(false); // frozen, not ending
+  });
+
+  it("shows a resumed light's span with a gap during the pause", () => {
+    const state: TrackerState = {
+      position: 12,
+      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3, until: 10 }] }],
+      effects: [],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[2].spanned).toBe(true); // before the pause
+    expect(boxes[5].spanned).toBe(false); // in the paused gap
+    expect(boxes[10].spanned).toBe(true); // resumed
+    expect(boxes[12].spanned).toBe(true); // last active turn (shifted expiry 13, - 1)
+    expect(boxes[13].spanned).toBe(false);
+    expect(boxes[12].endingCount).toBe(1);
+  });
+
+  it("hides days before the origin, rendering from the day that contains it", () => {
+    // position 600 is day 5 (turns 576-719); origin at that day's start hides days 1-4.
+    const state: TrackerState = { position: 600, origin: 576, lights: [], effects: [] };
+
+    const days = computeGrid(state);
+
+    expect(days.map((d) => d.header)).toEqual(["Day 5"]);
+    // The first rendered box is turn 576, not turn 0.
+    expect(days[0].hours[0].boxes[0].turn).toBe(576);
+  });
+
+  it("renders from Day 1 when origin is absent (backward compatible)", () => {
+    const days = computeGrid({ position: 600, lights: [], effects: [] });
+
+    expect(days[0].header).toBe("Day 1");
   });
 
   it("honors a configured look-ahead buffer for the render horizon", () => {

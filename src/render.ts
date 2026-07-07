@@ -2,6 +2,7 @@ import { Menu, setIcon } from "obsidian";
 import { MarkerKind, TrackerState } from "./model";
 import { computeGrid } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
+import { MarkerPhase, inSegments } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
 
@@ -15,6 +16,57 @@ export interface TrackerHandlers {
   onClearAll: () => void;
   onRemoveMarker: (kind: MarkerKind, index: number, label: string) => void;
   onRenameMarker: (kind: MarkerKind, index: number, name: string) => void;
+  onPause: (kind: MarkerKind, index: number) => void;
+  onResume: (kind: MarkerKind, index: number) => void;
+  onSetRemaining: (kind: MarkerKind, index: number, turns: number) => void;
+  onCopyState: () => void;
+}
+
+/**
+ * Turn a display element into a click-to-edit field: clicking swaps it for an input, which commits
+ * on Enter/blur (Escape cancels) and calls `onCommit` only when the value actually changed.
+ * Returns a `start()` so the edit can also be opened programmatically (e.g. from a menu).
+ */
+function inlineEdit(
+  target: HTMLElement,
+  opts: { value: string; cls: string; type?: string; onCommit: (value: string) => void },
+): () => void {
+  let editing = false;
+  const start = () => {
+    if (editing) return;
+    editing = true;
+    const input = createEl("input", { cls: opts.cls });
+    input.type = opts.type ?? "text";
+    input.value = opts.value;
+
+    let done = false;
+    const commit = (save: boolean) => {
+      if (done) return;
+      done = true;
+      editing = false;
+      const value = input.value.trim();
+      input.replaceWith(target); // restore immediately; a real change re-renders the widget
+      if (save && value !== opts.value) opts.onCommit(value);
+    };
+
+    input.addEventListener("click", (e) => e.stopPropagation()); // don't toggle the highlight
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") commit(true);
+      else if (e.key === "Escape") commit(false);
+    });
+    input.addEventListener("blur", () => commit(true));
+
+    target.replaceWith(input);
+    input.focus();
+    input.select();
+  };
+
+  target.addClass("is-editable");
+  target.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    start();
+  });
+  return start;
 }
 
 /**
@@ -34,10 +86,11 @@ export function renderTracker(
   const dayHeaderFn = dayHeader ?? makeDayHeader(state);
 
   const panel = computeEffectPanel(state, settings.presets);
-  // Effects whose span covers a turn, labelled for that turn's tooltip. Kept split by
-  // panel group so a not-yet-started effect reads "Upcoming", not "Active".
+  // Effects whose active burn covers a turn, labelled for that turn's tooltip. Kept split by
+  // panel group so a not-yet-started effect reads "Upcoming", not "Active", and pause gaps
+  // (excluded from `segments`) don't falsely claim a turn.
   const spanningNames = (rows: EffectRow[], turn: number) =>
-    rows.filter((r) => r.startsAt <= turn && turn < r.expiresAt).map((r) => r.label);
+    rows.filter((r) => inSegments(r.segments, turn)).map((r) => r.label);
 
   // Box click → jump; box hover → dim list rows not active on that turn.
   if (handlers) {
@@ -46,19 +99,17 @@ export function renderTracker(
       if (boxEl?.dataset.turn !== undefined) handlers.onBoxClick(Number(boxEl.dataset.turn));
     });
   }
+  // Panel rows with their burn segments, so hovering a box can dim the rows not active on it.
+  const dimRows: Array<{ el: HTMLElement; segments: Array<[number, number]> }> = [];
   root.addEventListener("mouseover", (evt) => {
     const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
     if (!boxEl) return;
     const turn = Number(boxEl.dataset.turn);
-    root.querySelectorAll<HTMLElement>(".osr-tt-effect").forEach((rowEl) => {
-      const s = Number(rowEl.dataset.start);
-      const e = Number(rowEl.dataset.end);
-      rowEl.toggleClass("is-dimmed", !(s <= turn && turn < e));
-    });
+    for (const { el, segments } of dimRows) el.toggleClass("is-dimmed", !inSegments(segments, turn));
   });
   root.addEventListener("mouseout", (evt) => {
     if (!(evt.target as HTMLElement).closest(".osr-tt-box")) return;
-    root.querySelectorAll(".osr-tt-effect.is-dimmed").forEach((el) => el.removeClass("is-dimmed"));
+    for (const { el } of dimRows) el.removeClass("is-dimmed");
   });
 
   const grid = computeGrid(state, { lookaheadBuffer: settings.lookaheadBuffer, dayHeader: dayHeaderFn });
@@ -73,6 +124,17 @@ export function renderTracker(
     headerEl.createSpan({ cls: "osr-tt-day-name", text: day.header });
     if (day.currentTime) {
       headerEl.createSpan({ cls: "osr-tt-day-time", text: day.currentTime });
+    }
+    if (handlers) {
+      // Right-click a day to copy the whole tracker as a code block, to paste into a new note.
+      headerEl.addEventListener("contextmenu", (evt) => {
+        evt.preventDefault();
+        const menu = new Menu();
+        menu.addItem((item) =>
+          item.setTitle("Copy tracker state").setIcon("copy").onClick(() => handlers.onCopyState()),
+        );
+        menu.showAtMouseEvent(evt);
+      });
     }
 
     const hoursEl = dayEl.createDiv({ cls: "osr-tt-hours" });
@@ -106,35 +168,34 @@ export function renderTracker(
   // The button bar sits directly above the effect panel.
   if (handlers) renderControls(root, handlers, settings);
 
-  renderPanel(root, panel, dayHeaderFn, handlers);
+  renderPanel(root, panel, dayHeaderFn, dimRows, handlers);
 }
 
-/** Render the Active / Upcoming / Expired effect lists below the controls. */
+/** Render the Active / Paused / Upcoming / Expired effect lists below the controls. */
 function renderPanel(
   root: HTMLElement,
-  { active, upcoming, expired }: EffectPanel,
+  { active, paused, upcoming, expired }: EffectPanel,
   dayHeader: (dayIndex: number) => string,
+  dimRows: Array<{ el: HTMLElement; segments: Array<[number, number]> }>,
   handlers?: TrackerHandlers,
 ): void {
-  if (active.length === 0 && upcoming.length === 0 && expired.length === 0) return;
+  if (active.length + paused.length + upcoming.length + expired.length === 0) return;
 
   const panelEl = root.createDiv({ cls: "osr-tt-panel" });
 
-  // Click a row to paint its [startsAt, expiresAt) span on the grid; click again to clear.
+  // Click a row to paint its active burn segments on the grid; click again to clear.
   let selected: EffectRow | undefined;
   const applyHighlight = () => {
     root.querySelectorAll<HTMLElement>(".osr-tt-box").forEach((el) => {
       const turn = Number(el.dataset.turn);
-      const on = selected !== undefined && turn >= selected.startsAt && turn < selected.expiresAt;
+      const on = selected !== undefined && inSegments(selected.segments, turn);
       el.toggleClass("is-highlit", on);
     });
   };
 
-  const renderRow = (container: HTMLElement, row: EffectRow) => {
-    const rowEl = container.createDiv({
-      cls: "osr-tt-effect",
-      attr: { "data-start": row.startsAt, "data-end": row.expiresAt },
-    });
+  const renderRow = (container: HTMLElement, row: EffectRow, phase: MarkerPhase) => {
+    const rowEl = container.createDiv({ cls: "osr-tt-effect" });
+    dimRows.push({ el: rowEl, segments: row.segments });
     rowEl.setAttribute(
       "title",
       `${formatSpan(row.startsAt, row.expiresAt, dayHeader)} · ${row.remaining} turn(s) left`,
@@ -142,51 +203,27 @@ function renderPanel(
 
     const nameEl = rowEl.createSpan({ cls: "osr-tt-effect-name", text: row.label });
     if (handlers) {
-      // Swap the name span for an inline input to give this instance a custom name
-      // (e.g. a specific character's torch). Reused by the name click and the menu.
-      let editing = false;
-      const startEdit = () => {
-        if (editing) return;
-        editing = true;
-        const input = createEl("input", { cls: "osr-tt-effect-name-edit" });
-        input.type = "text";
-        input.value = row.name;
-
-        let done = false;
-        const commit = (save: boolean) => {
-          if (done) return;
-          done = true;
-          editing = false;
-          const value = input.value.trim();
-          input.replaceWith(nameEl); // restore immediately; a real change re-renders the widget
-          if (save && value !== row.name) {
-            handlers.onRenameMarker(row.kind, row.index, value);
-          }
-        };
-
-        input.addEventListener("click", (e) => e.stopPropagation()); // don't toggle the highlight
-        input.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") commit(true);
-          else if (e.key === "Escape") commit(false);
-        });
-        input.addEventListener("blur", () => commit(true));
-
-        nameEl.replaceWith(input);
-        input.focus();
-        input.select();
-      };
-
-      // Single-click the name to rename (a pencil cursor hints at it); clicking elsewhere highlights.
-      nameEl.addClass("is-editable");
-      nameEl.addEventListener("click", (evt) => {
-        evt.stopPropagation();
-        startEdit();
+      // Single-click the name to rename (also reachable from the menu); clicking elsewhere highlights.
+      const startRename = inlineEdit(nameEl, {
+        value: row.name,
+        cls: "osr-tt-effect-name-edit",
+        onCommit: (v) => handlers.onRenameMarker(row.kind, row.index, v),
       });
 
       rowEl.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         const menu = new Menu();
-        menu.addItem((item) => item.setTitle("Rename").setIcon("pencil").onClick(startEdit));
+        menu.addItem((item) => item.setTitle("Rename").setIcon("pencil").onClick(startRename));
+        if (phase === "active" && row.pausable) {
+          menu.addItem((item) =>
+            item.setTitle("Pause").setIcon("pause").onClick(() => handlers.onPause(row.kind, row.index)),
+          );
+        }
+        if (phase === "paused") {
+          menu.addItem((item) =>
+            item.setTitle("Resume").setIcon("play").onClick(() => handlers.onResume(row.kind, row.index)),
+          );
+        }
         menu.addItem((item) =>
           item
             .setTitle("Delete")
@@ -201,9 +238,27 @@ function renderPanel(
     bar.createDiv({ cls: "osr-tt-effect-bar-fill" }).style.width =
       `${Math.round(Math.max(0, Math.min(1, row.progress)) * 100)}%`;
 
-    rowEl.createSpan({ cls: "osr-tt-effect-time", text: `${row.remaining}` });
-
+    const timeEl = rowEl.createSpan({ cls: "osr-tt-effect-time", text: `${row.remaining}` });
     if (handlers) {
+      // Click the turns-left number to set it — e.g. dialing in durations after adding effects.
+      inlineEdit(timeEl, {
+        value: `${row.remaining}`,
+        type: "number",
+        cls: "osr-tt-effect-time-edit",
+        onCommit: (v) => {
+          const turns = Number(v);
+          if (Number.isInteger(turns) && turns >= 1) handlers.onSetRemaining(row.kind, row.index, turns);
+        },
+      });
+
+      if (phase === "paused") {
+        const play = rowEl.createSpan({ cls: "osr-tt-effect-play", attr: { "aria-label": "Resume" } });
+        setIcon(play, "play");
+        play.addEventListener("click", (evt) => {
+          evt.stopPropagation();
+          handlers.onResume(row.kind, row.index);
+        });
+      }
       rowEl.createSpan({ cls: "osr-tt-chip-x", text: "×" }).addEventListener("click", (evt) => {
         evt.stopPropagation(); // don't also toggle the highlight
         handlers.onRemoveMarker(row.kind, row.index, row.label);
@@ -218,22 +273,24 @@ function renderPanel(
     });
   };
 
-  const section = (title: string, rows: EffectRow[], collapsed: boolean) => {
+  const section = (title: string, rows: EffectRow[], phase: MarkerPhase, collapsed: boolean) => {
     if (rows.length === 0) return;
+    const cls = `osr-tt-panel-section is-${phase}`;
     if (collapsed) {
-      const el = panelEl.createEl("details", { cls: "osr-tt-panel-section" });
+      const el = panelEl.createEl("details", { cls });
       el.createEl("summary", { cls: "osr-tt-panel-title", text: `${title} (${rows.length})` });
-      rows.forEach((row) => renderRow(el, row));
+      rows.forEach((row) => renderRow(el, row, phase));
     } else {
-      const el = panelEl.createDiv({ cls: "osr-tt-panel-section" });
+      const el = panelEl.createDiv({ cls });
       el.createDiv({ cls: "osr-tt-panel-title", text: title });
-      rows.forEach((row) => renderRow(el, row));
+      rows.forEach((row) => renderRow(el, row, phase));
     }
   };
 
-  section("Active effects", active, false);
-  section("Upcoming", upcoming, true);
-  section("Expired", expired, true);
+  section("Active", active, "active", false);
+  section("Paused", paused, "paused", false);
+  section("Upcoming", upcoming, "upcoming", true);
+  section("Expired", expired, "expired", true);
 }
 
 function renderControls(

@@ -1,4 +1,5 @@
 import { DEFAULT_LIGHT_PRESETS, LightPreset, MarkerKind, TrackerState } from "./model";
+import { MarkerPhase, resolveMarker } from "./markers";
 
 export interface EffectRow {
   kind: MarkerKind;
@@ -9,68 +10,75 @@ export interface EffectRow {
   /** Display name: `name`, disambiguated with a trailing number when a list repeats one. */
   label: string;
   startsAt: number;
+  /** Effective expiry, accounting for completed pauses. */
   expiresAt: number;
-  /** 0..1 through the marker's window. */
+  /** Active burn intervals `[from, to)` — pause gaps excluded. */
+  segments: Array<[number, number]>;
+  /** Whether this marker can be paused/resumed (driven by the preset for lights). */
+  pausable: boolean;
+  /** 0..1 through the marker's burn. */
   progress: number;
   /** Turns until expiry. */
   remaining: number;
 }
 
-export interface EffectPanel {
-  active: EffectRow[];
-  upcoming: EffectRow[];
-  expired: EffectRow[];
-}
+export type EffectPanel = Record<MarkerPhase, EffectRow[]>;
 
 /**
- * Build the effect panel from tracker state: unify lights + effects, partition into
- * upcoming (not lit yet) / active / expired by `position`, sort each by start then name,
- * and number same-named rows within a list ("Torch", "Torch 2", …). The number is a
- * display artifact of the current partition, so a survivor reverts to its bare name once
- * the others leave the list.
+ * Build the effect panel from tracker state: unify lights + effects, resolve each marker's burn
+ * state (honouring pauses) relative to `position`, partition into active / paused / upcoming /
+ * expired, sort each by start then name, and number same-named rows within a list.
  */
 export function computeEffectPanel(
   state: TrackerState,
   presets: LightPreset[] = DEFAULT_LIGHT_PRESETS,
 ): EffectPanel {
   const markers = [
-    ...state.lights.map((l, index) => ({
-      kind: "light" as const,
-      index,
-      // A custom instance name wins; otherwise the preset's full name (glyphs are gone).
-      base: l.label ?? presets.find((p) => p.id === l.preset)?.label ?? l.preset,
-      startsAt: l.startsAt ?? 0,
-      expiresAt: l.expiresAt,
-    })),
-    ...state.effects.map((e, index) => ({
+    ...state.lights.map((src, index) => {
+      const preset = presets.find((p) => p.id === src.preset);
+      return {
+        kind: "light" as const,
+        index,
+        // A custom instance name wins; otherwise the preset's full name (glyphs are gone).
+        base: src.label ?? preset?.label ?? src.preset,
+        pausable: !!preset?.pausable,
+        src,
+      };
+    }),
+    ...state.effects.map((src, index) => ({
       kind: "effect" as const,
       index,
-      base: e.label,
-      startsAt: e.startsAt ?? 0,
-      expiresAt: e.expiresAt,
+      base: src.label,
+      pausable: false,
+      src,
     })),
   ];
 
-  const active: EffectRow[] = [];
-  const upcoming: EffectRow[] = [];
-  const expired: EffectRow[] = [];
+  const lists: EffectPanel = { active: [], paused: [], upcoming: [], expired: [] };
 
   for (const m of markers) {
-    const list =
-      state.position < m.startsAt ? upcoming : state.position >= m.expiresAt ? expired : active;
-    list.push({
+    const r = resolveMarker(m.src, state.position);
+    const duration = m.src.duration;
+    lists[r.phase].push({
       kind: m.kind,
       index: m.index,
       name: m.base,
       label: m.base,
-      startsAt: m.startsAt,
-      expiresAt: m.expiresAt,
-      progress: (state.position - m.startsAt) / (m.expiresAt - m.startsAt),
-      remaining: Math.max(0, m.expiresAt - state.position),
+      startsAt: r.startsAt,
+      expiresAt: r.expiresAt,
+      segments: r.segments,
+      pausable: m.pausable,
+      progress: duration > 0 ? (duration - r.remaining) / duration : 1,
+      remaining: r.remaining,
     });
   }
 
-  return { active: number(active), upcoming: number(upcoming), expired: number(expired) };
+  return {
+    active: number(lists.active),
+    paused: number(lists.paused),
+    upcoming: number(lists.upcoming),
+    expired: number(lists.expired),
+  };
 }
 
 /** Sort a list by start then name, then append " 2", " 3", … to repeats of a base name. */

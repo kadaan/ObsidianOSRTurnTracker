@@ -14,11 +14,13 @@ export interface LightPreset {
   marker: string;
   /** Duration in turns. */
   turns: number;
+  /** Whether instances of this preset can be paused/resumed (freezing their burn). */
+  pausable?: boolean;
 }
 
 export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
-  { id: "torch", label: "Torch", marker: "torch", turns: 6 },
-  { id: "lantern", label: "Lantern", marker: "lantern", turns: 24 },
+  { id: "torch", label: "Torch", marker: "torch", turns: 6, pausable: true },
+  { id: "lantern", label: "Lantern", marker: "lantern", turns: 24, pausable: true },
 ];
 
 /** Turns rendered past the furthest marker/position, for look-ahead. A setting later. */
@@ -33,12 +35,24 @@ export const MINUTES_PER_TURN = 60 / TURNS_PER_HOUR; // 10
 export const HOURS_PER_DAY = 24;
 export const TURNS_PER_DAY = TURNS_PER_HOUR * HOURS_PER_DAY; // 144
 
+/** The 0-based day index a turn falls in. */
+export const dayOf = (turn: number): number => Math.floor(turn / TURNS_PER_DAY);
+
 /**
  * Upper bound on `position`, guarding against a hand-entered value that would
  * render millions of boxes and freeze the renderer. A year of in-game time is a
  * generous ceiling for a per-session tracker.
  */
 export const MAX_POSITION = 366 * TURNS_PER_DAY;
+
+/**
+ * A pause interval on a marker. `at` is the position it was paused; `until` the position it
+ * was resumed (absent → still paused). The list of these lets the burn state be rebuilt.
+ */
+export interface Pause {
+  at: number;
+  until?: number;
+}
 
 /** A light source, driven by a preset. Turn indices are absolute. */
 export interface Light {
@@ -47,7 +61,10 @@ export interface Light {
   label?: string;
   /** Turn the light was lit. Absent on legacy markers → treated as turn 0 (never pending). */
   startsAt?: number;
-  expiresAt: number;
+  /** Burn duration in active turns; the effective expiry is derived (startsAt + duration + pauses). */
+  duration: number;
+  /** Pause/resume history; absent → never paused. */
+  pauses?: Pause[];
 }
 
 /** An ad-hoc timed effect with a free-text label. Turn indices are absolute. */
@@ -55,7 +72,10 @@ export interface Effect {
   label: string;
   /** Turn the effect began. Absent on legacy markers → treated as turn 0 (never pending). */
   startsAt?: number;
-  expiresAt: number;
+  /** Duration in active turns; the effective expiry is derived (startsAt + duration + pauses). */
+  duration: number;
+  /** Pause/resume history; absent → never paused. */
+  pauses?: Pause[];
 }
 
 /** The full state of a tracker, as stored in a `turn-tracker` code block. */
@@ -66,6 +86,11 @@ export interface TrackerState {
   calendar?: string;
   /** Turns elapsed since start. Boxes [0, position) are ticked. */
   position: number;
+  /**
+   * Turn to begin rendering from; days before the one containing it are hidden. Absent/0 renders
+   * from Day 1. Used when cloning a session into a new note so prior elapsed days aren't replayed.
+   */
+  origin?: number;
   lights: Light[];
   effects: Effect[];
 }

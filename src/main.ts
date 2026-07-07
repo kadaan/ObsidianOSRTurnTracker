@@ -21,13 +21,16 @@ import {
   lightSource,
   removeMarker,
   renameMarker,
+  setRemaining,
+  pauseMarker,
+  resumeMarker,
   toggleAt,
 } from "./actions";
 import { applyTrackerAction } from "./apply";
 import { BlockRange, findTrackerBlockAt } from "./block";
-import { serializeTrackerState } from "./serialize";
+import { fenceTrackerBlock } from "./serialize";
 import { seedTrackerState } from "./seed";
-import { LightPreset, TRACKER_LANG, Transform } from "./model";
+import { LightPreset, TRACKER_LANG, TURNS_PER_DAY, Transform, TrackerState, dayOf } from "./model";
 import { makeFantasyDayHeader } from "./calendarium";
 import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
 
@@ -80,6 +83,11 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           ).open(),
         onRenameMarker: (kind, index, name) =>
           void this.mutateFromWidget(el, ctx, renameMarker(kind, index, name)),
+        onPause: (kind, index) => void this.mutateFromWidget(el, ctx, pauseMarker(kind, index)),
+        onResume: (kind, index) => void this.mutateFromWidget(el, ctx, resumeMarker(kind, index)),
+        onSetRemaining: (kind, index, turns) =>
+          void this.mutateFromWidget(el, ctx, setRemaining(kind, index, turns)),
+        onCopyState: () => void this.copyState(result.state),
       }, makeFantasyDayHeader(result.state, () => this.warnCalendar()));
     });
 
@@ -106,8 +114,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         const frontmatter = file
           ? this.app.metadataCache.getFileCache(file)?.frontmatter
           : undefined;
-        const body = serializeTrackerState(seedTrackerState(frontmatter));
-        editor.replaceSelection(`\`\`\`${TRACKER_LANG}\n${body}\n\`\`\`\n`);
+        editor.replaceSelection(`${fenceTrackerBlock(seedTrackerState(frontmatter))}\n`);
       },
     });
   }
@@ -169,6 +176,18 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     if (this.calendarWarned) return;
     this.calendarWarned = true;
     new Notice("OSR Turn Tracker: couldn't read the Calendarium calendar — using default dates.");
+  }
+
+  /** Copy the tracker as a `turn-tracker` code block, ready to paste into another note. */
+  private async copyState(state: TrackerState): Promise<void> {
+    // Stamp the render origin at the current day's start so a pasted clone doesn't replay prior days.
+    const origin = dayOf(state.position) * TURNS_PER_DAY;
+    try {
+      await navigator.clipboard.writeText(fenceTrackerBlock({ ...state, origin }));
+      new Notice("Tracker state copied to clipboard.");
+    } catch {
+      new Notice("OSR Turn Tracker: couldn't access the clipboard.");
+    }
   }
 }
 
@@ -296,6 +315,15 @@ class OsrSettingsTab extends PluginSettingTab {
           });
         })
         .addText((t) => this.numberInput(t, 1, () => preset.turns, (n) => (preset.turns = n)))
+        .addToggle((t) =>
+          t
+            .setTooltip("Pausable")
+            .setValue(preset.pausable ?? false)
+            .onChange(async (v) => {
+              preset.pausable = v;
+              await this.plugin.saveSettings();
+            }),
+        )
         .addExtraButton((b) =>
           b.setIcon("trash").setTooltip("Remove").onClick(async () => {
             s.presets.splice(i, 1);
@@ -312,6 +340,7 @@ class OsrSettingsTab extends PluginSettingTab {
           label: "New light",
           marker: "?",
           turns: 6,
+          pausable: true,
         });
         await this.plugin.saveSettings();
         this.display();
