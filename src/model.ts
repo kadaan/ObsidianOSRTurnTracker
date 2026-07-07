@@ -1,5 +1,8 @@
 /** Core domain model for the OSR Turn Tracker. */
 
+/** The code-block language / fence info-string that identifies a tracker. */
+export const TRACKER_LANG = "turn-tracker";
+
 /** A turn is 10 minutes; these are enforced constants, never configurable. */
 export const TURNS_PER_HOUR = 6;
 export const HOURS_PER_DAY = 24;
@@ -35,3 +38,9 @@ export interface TrackerState {
   lights: Light[];
   effects: Effect[];
 }
+
+/** A pure state transition (e.g. End Turn, Advance). */
+export type Transform = (state: TrackerState) => TrackerState;
+
+/** Shared failure branch for `Result`-style returns. */
+export type Failure = { ok: false; error: string };

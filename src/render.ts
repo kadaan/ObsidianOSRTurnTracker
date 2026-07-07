@@ -1,13 +1,31 @@
 import { TrackerState } from "./model";
 import { computeGrid } from "./grid";
 
+export interface TrackerHandlers {
+  onEndTurn: () => void;
+}
+
 /**
- * Render a read-only tracker grid into `container` using Obsidian's DOM helpers
- * (no innerHTML). Thin adapter over the tested `computeGrid`.
+ * Render a tracker grid into `container` using Obsidian's DOM helpers (no
+ * innerHTML). Thin adapter over the tested `computeGrid`. When `handlers` is
+ * given, a controls bar with the End Turn button is rendered above the grid.
  */
-export function renderTracker(container: HTMLElement, state: TrackerState): void {
+export function renderTracker(
+  container: HTMLElement,
+  state: TrackerState,
+  handlers?: TrackerHandlers,
+): void {
   container.empty();
   const root = container.createDiv({ cls: "osr-tt" });
+
+  if (handlers) {
+    const controls = root.createDiv({ cls: "osr-tt-controls" });
+    const endTurnBtn = controls.createEl("button", {
+      cls: "osr-tt-btn",
+      text: "⏩ End Turn",
+    });
+    endTurnBtn.addEventListener("click", handlers.onEndTurn);
+  }
 
   for (const day of computeGrid(state)) {
     const dayEl = root.createDiv({ cls: "osr-tt-day" });

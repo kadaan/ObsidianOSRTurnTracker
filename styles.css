@@ -5,6 +5,17 @@
   line-height: 1.4;
 }
 
+.osr-tt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin-bottom: 0.75em;
+}
+
+.osr-tt-btn {
+  cursor: pointer;
+}
+
 .osr-tt-day {
   margin-bottom: 0.75em;
 }

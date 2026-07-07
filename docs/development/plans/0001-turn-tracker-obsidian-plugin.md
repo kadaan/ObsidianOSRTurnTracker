@@ -80,12 +80,12 @@ read→act→persist→render cycle end-to-end.
 
 ### Acceptance criteria
 
-- [ ] Clicking **End Turn** ticks the next box and increments `position` in the
-      code block's YAML on disk.
-- [ ] The "End Turn" command appears in the palette and can be bound to a hotkey;
-      invoking it has the same effect as the button.
-- [ ] After the action the widget reflects the new state without a manual reload.
-- [ ] Edits target the correct block when the note contains other content and other
+- [x] Clicking **End Turn** ticks the next box and increments `position` in the
+      code block's YAML on disk. *(Confirmed in-vault.)*
+- [~] The "End Turn" command appears in the palette and can be bound to a hotkey;
+      invoking it has the same effect as the button. *(Command registered; block locator unit-tested; palette/hotkey pending manual confirmation.)*
+- [x] After the action the widget reflects the new state without a manual reload. *(Confirmed in-vault.)*
+- [x] Edits target the correct block when the note contains other content and other
       code blocks (line range resolved at click time, not render time).
 
 ---
