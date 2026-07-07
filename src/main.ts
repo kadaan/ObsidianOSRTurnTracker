@@ -5,7 +5,9 @@ import {
   Modal,
   Notice,
   Plugin,
+  PluginSettingTab,
   Setting,
+  TextComponent,
   TFile,
 } from "obsidian";
 import { parseTrackerState } from "./parse";
@@ -22,13 +24,33 @@ import {
 } from "./actions";
 import { applyTrackerAction } from "./apply";
 import { BlockRange, findTrackerBlockAt } from "./block";
-import { DEFAULT_ADVANCE_SHORTCUTS, TRACKER_LANG, Transform } from "./model";
+import { serializeTrackerState } from "./serialize";
+import { seedTrackerState } from "./seed";
+import { LightPreset, TRACKER_LANG, Transform } from "./model";
+import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
 
 export default class OsrTurnTrackerPlugin extends Plugin {
+  settings: OsrTurnTrackerSettings = createDefaultSettings();
+
   /** Serializes writes so rapid clicks can't race on a stale block snapshot. */
   private applying = false;
 
   async onload() {
+    // Validate each field against malformed/stale persisted data rather than trusting the shape.
+    const loaded = (await this.loadData()) ?? {};
+    const defaults = createDefaultSettings();
+    this.settings = {
+      presets: Array.isArray(loaded.presets)
+        ? loaded.presets.map((p: LightPreset) => ({ ...p }))
+        : defaults.presets,
+      advanceShortcuts: Array.isArray(loaded.advanceShortcuts)
+        ? [...loaded.advanceShortcuts]
+        : defaults.advanceShortcuts,
+      lookaheadBuffer:
+        typeof loaded.lookaheadBuffer === "number" ? loaded.lookaheadBuffer : defaults.lookaheadBuffer,
+    };
+    this.addSettingTab(new OsrSettingsTab(this.app, this));
+
     // Processors registered on the plugin are auto-detached on unload.
     this.registerMarkdownCodeBlockProcessor(TRACKER_LANG, (source, el, ctx) => {
       const result = parseTrackerState(source);
@@ -36,7 +58,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         renderError(el, result.error);
         return;
       }
-      renderTracker(el, result.state, {
+      renderTracker(el, result.state, this.settings, {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
@@ -58,13 +80,31 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       editorCallback: (editor) => void this.mutateFromEditor(editor, endTurn),
     });
 
-    for (const hours of DEFAULT_ADVANCE_SHORTCUTS) {
+    // Registered from settings at load; changing the list takes effect on reload.
+    for (const hours of this.settings.advanceShortcuts) {
       this.addCommand({
         id: `advance-${hours}h`,
         name: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
         editorCallback: (editor) => void this.mutateFromEditor(editor, advanceHours(hours)),
       });
     }
+
+    this.addCommand({
+      id: "insert-tracker",
+      name: "Insert turn tracker",
+      editorCallback: (editor) => {
+        const file = this.app.workspace.getActiveFile();
+        const frontmatter = file
+          ? this.app.metadataCache.getFileCache(file)?.frontmatter
+          : undefined;
+        const body = serializeTrackerState(seedTrackerState(frontmatter));
+        editor.replaceSelection(`\`\`\`${TRACKER_LANG}\n${body}\n\`\`\`\n`);
+      },
+    });
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
   }
 
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
@@ -157,5 +197,100 @@ class EffectModal extends Modal {
     }
     this.onSubmit(this.label, turns);
     this.close();
+  }
+}
+
+/** Settings tab: manage light presets, advance shortcuts, and the look-ahead buffer. */
+class OsrSettingsTab extends PluginSettingTab {
+  constructor(
+    app: App,
+    private readonly plugin: OsrTurnTrackerPlugin,
+  ) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    const s = this.plugin.settings;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Look-ahead buffer")
+      .setDesc("Turns rendered past the furthest marker.")
+      .addText((t) =>
+        this.numberInput(t, 0, () => s.lookaheadBuffer, (n) => (s.lookaheadBuffer = n)),
+      );
+
+    new Setting(containerEl)
+      .setName("Advance shortcuts (hours)")
+      .setDesc("Comma-separated. Buttons update live; commands take effect after reload.")
+      .addText((t) =>
+        t.setValue(s.advanceShortcuts.join(", ")).onChange(async (v) => {
+          const hours = v
+            .split(",")
+            .map((x) => Number(x.trim()))
+            .filter((n) => Number.isInteger(n) && n > 0);
+          s.advanceShortcuts = [...new Set(hours)];
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("Light presets").setHeading();
+
+    s.presets.forEach((preset, i) => {
+      new Setting(containerEl)
+        .addText((t) =>
+          t.setPlaceholder("Label").setValue(preset.label).onChange(async (v) => {
+            preset.label = v;
+            await this.plugin.saveSettings();
+          }),
+        )
+        .addText((t) => {
+          t.inputEl.size = 3;
+          t.setPlaceholder("Glyph").setValue(preset.marker).onChange(async (v) => {
+            preset.marker = v;
+            await this.plugin.saveSettings();
+          });
+        })
+        .addText((t) => this.numberInput(t, 1, () => preset.turns, (n) => (preset.turns = n)))
+        .addExtraButton((b) =>
+          b.setIcon("trash").setTooltip("Remove").onClick(async () => {
+            s.presets.splice(i, 1);
+            await this.plugin.saveSettings();
+            this.display();
+          }),
+        );
+    });
+
+    new Setting(containerEl).addButton((b) =>
+      b.setButtonText("Add preset").onClick(async () => {
+        s.presets.push({
+          id: `preset-${Math.random().toString(36).slice(2, 8)}`,
+          label: "New light",
+          marker: "?",
+          turns: 6,
+        });
+        await this.plugin.saveSettings();
+        this.display();
+      }),
+    );
+  }
+
+  /** Wire a text field as a whole-number input (≥ min) that persists valid values. */
+  private numberInput(
+    t: TextComponent,
+    min: number,
+    get: () => number,
+    set: (n: number) => void,
+  ): void {
+    t.inputEl.type = "number";
+    t.inputEl.min = String(min);
+    t.setValue(String(get())).onChange(async (v) => {
+      const n = Number(v);
+      if (Number.isInteger(n) && n >= min) {
+        set(n);
+        await this.plugin.saveSettings();
+      }
+    });
   }
 }

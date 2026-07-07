@@ -8,7 +8,14 @@ import {
   LOOKAHEAD_BUFFER,
   MAX_POSITION,
   MarkerKind,
+  LightPreset,
+  DEFAULT_LIGHT_PRESETS,
 } from "./model";
+
+export interface GridOptions {
+  presets?: LightPreset[];
+  lookaheadBuffer?: number;
+}
 
 export type BoxStatus = "past" | "current" | "future";
 
@@ -59,9 +66,9 @@ const formatClock = (turnsIntoDay: number): string =>
   `${pad(Math.floor(turnsIntoDay / TURNS_PER_HOUR))}:${pad((turnsIntoDay % TURNS_PER_HOUR) * MINUTES_PER_TURN)}`;
 
 /** Group markers by expiry turn, keyed for quick per-box lookup. */
-function placeMarkers(state: TrackerState): Map<number, MarkerChip[]> {
+function placeMarkers(state: TrackerState, presets: LightPreset[]): Map<number, MarkerChip[]> {
   const marks = [
-    ...state.lights.map((l) => ({ label: lightGlyph(l.preset), kind: "light" as const, key: l.preset, expiresAt: l.expiresAt })),
+    ...state.lights.map((l) => ({ label: lightGlyph(l.preset, presets), kind: "light" as const, key: l.preset, expiresAt: l.expiresAt })),
     ...state.effects.map((e) => ({ label: e.label, kind: "effect" as const, key: e.label, expiresAt: e.expiresAt })),
   ];
 
@@ -90,14 +97,17 @@ function placeMarkers(state: TrackerState): Map<number, MarkerChip[]> {
 }
 
 /** Compute the render model (day blocks → hour rows → boxes) from tracker state. */
-export function computeGrid(state: TrackerState): DayBlock[] {
+export function computeGrid(state: TrackerState, options: GridOptions = {}): DayBlock[] {
+  const presets = options.presets ?? DEFAULT_LIGHT_PRESETS;
+  const buffer = options.lookaheadBuffer ?? LOOKAHEAD_BUFFER;
+
   const days: DayBlock[] = [];
-  const chipsByTurn = placeMarkers(state);
+  const chipsByTurn = placeMarkers(state, presets);
 
   // Render whole days through the furthest of (position, any marker expiry) + buffer,
   // clamped so a hand-edited huge expiry can't explode the grid.
   const expiries = state.lights.map((l) => l.expiresAt);
-  const horizon = Math.min(Math.max(state.position, ...expiries) + LOOKAHEAD_BUFFER, MAX_POSITION);
+  const horizon = Math.min(Math.max(state.position, ...expiries) + buffer, MAX_POSITION);
   const dayCount = Math.floor(horizon / TURNS_PER_DAY) + 1;
 
   for (let day = 0; day < dayCount; day++) {

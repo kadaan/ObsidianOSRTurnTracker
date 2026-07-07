@@ -25,8 +25,8 @@ export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
 export const LOOKAHEAD_BUFFER = 6;
 
 /** The chip glyph for a light preset id (falls back to "?" for an unknown preset). */
-export const lightGlyph = (presetId: string): string =>
-  DEFAULT_LIGHT_PRESETS.find((p) => p.id === presetId)?.marker ?? "?";
+export const lightGlyph = (presetId: string, presets: LightPreset[] = DEFAULT_LIGHT_PRESETS): string =>
+  presets.find((p) => p.id === presetId)?.marker ?? "?";
 
 /** Which marker list a chip came from — its removal target. */
 export type MarkerKind = "light" | "effect";

@@ -152,6 +152,26 @@ describe("computeGrid", () => {
     ]);
   });
 
+  it("honors a configured look-ahead buffer for the render horizon", () => {
+    const state: TrackerState = { position: 0, lights: [], effects: [] };
+
+    expect(computeGrid(state)).toHaveLength(1); // default buffer stays within day 1
+    expect(computeGrid(state, { lookaheadBuffer: 200 })).toHaveLength(2); // buffer reaches day 2
+  });
+
+  it("uses configured presets for a light's chip glyph", () => {
+    const state: TrackerState = {
+      position: 0,
+      lights: [{ preset: "candle", expiresAt: 3 }],
+      effects: [],
+    };
+    const presets = [{ id: "candle", label: "Candle", marker: "C", turns: 3 }];
+
+    const boxes = computeGrid(state, { presets }).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[2].markers[0].label).toBe("C");
+  });
+
   it("labels hour rows 00:00 through 23:00", () => {
     const [day] = computeGrid(stateAt(0));
 

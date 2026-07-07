@@ -1,6 +1,7 @@
 import { setIcon } from "obsidian";
-import { DEFAULT_ADVANCE_SHORTCUTS, DEFAULT_LIGHT_PRESETS, MarkerKind, TrackerState } from "./model";
+import { MarkerKind, TrackerState } from "./model";
 import { computeGrid } from "./grid";
+import { OsrTurnTrackerSettings } from "./settings";
 
 export interface TrackerHandlers {
   onEndTurn: () => void;
@@ -21,13 +22,14 @@ export interface TrackerHandlers {
 export function renderTracker(
   container: HTMLElement,
   state: TrackerState,
+  settings: OsrTurnTrackerSettings,
   handlers?: TrackerHandlers,
 ): void {
   container.empty();
   const root = container.createDiv({ cls: "osr-tt" });
 
   if (handlers) {
-    renderControls(root, handlers);
+    renderControls(root, handlers, settings);
     // One delegated listener beats one per box when the grid is large.
     root.addEventListener("click", (evt) => {
       const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
@@ -35,7 +37,11 @@ export function renderTracker(
     });
   }
 
-  for (const day of computeGrid(state)) {
+  const grid = computeGrid(state, {
+    presets: settings.presets,
+    lookaheadBuffer: settings.lookaheadBuffer,
+  });
+  for (const day of grid) {
     // Completed days collapse (click to expand) and dim; the active day stays open.
     const dayEl = root.createEl("details", { cls: "osr-tt-day" });
     dayEl.toggleClass("is-complete", day.complete);
@@ -75,16 +81,20 @@ export function renderTracker(
   }
 }
 
-function renderControls(root: HTMLElement, handlers: TrackerHandlers): void {
+function renderControls(
+  root: HTMLElement,
+  handlers: TrackerHandlers,
+  settings: OsrTurnTrackerSettings,
+): void {
   const controls = root.createDiv({ cls: "osr-tt-controls" });
   const addButton = (text: string, onClick: () => void) =>
     controls.createEl("button", { cls: "osr-tt-btn", text }).addEventListener("click", onClick);
 
   addButton("⏩ End Turn", handlers.onEndTurn);
-  for (const hours of DEFAULT_ADVANCE_SHORTCUTS) {
+  for (const hours of settings.advanceShortcuts) {
     addButton(`+${hours}h`, () => handlers.onAdvanceHours(hours));
   }
-  for (const preset of DEFAULT_LIGHT_PRESETS) {
+  for (const preset of settings.presets) {
     addButton(preset.label, () => handlers.onLight(preset.id, preset.turns));
   }
   addButton("+ Effect", handlers.onAddEffect);

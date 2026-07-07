@@ -173,12 +173,12 @@ that inserts a fresh `turn-tracker` block, seeding `start`/`calendar` from the n
 
 ### Acceptance criteria
 
-- [ ] Editing a preset's duration in settings changes how far ahead its button places
-      a marker; adding a preset adds a corresponding widget button.
-- [ ] Advance shortcuts and look-ahead buffer are configurable and take effect.
-- [ ] "Insert Turn Tracker" drops a valid block; when the note has `startTime` or
+- [~] Editing a preset's duration in settings changes how far ahead its button places
+      a marker; adding a preset adds a corresponding widget button. *(Configured presets drive `computeGrid` glyph (unit-tested) and the buttons; settings-tab editing + button wiring need a manual pass.)*
+- [~] Advance shortcuts and look-ahead buffer are configurable and take effect. *(Buffer honored by `computeGrid` (unit-tested); shortcut buttons/commands + tab need a manual pass — commands re-register on reload.)*
+- [~] "Insert Turn Tracker" drops a valid block; when the note has `startTime` or
       `fc-calendar`, those seed the block's `start`/`calendar`; otherwise it defaults
-      to Day-1 / no calendar.
+      to Day-1 / no calendar. *(`seedTrackerState` fully unit-tested; the editor insertion needs a manual pass.)*
 
 ---
 
