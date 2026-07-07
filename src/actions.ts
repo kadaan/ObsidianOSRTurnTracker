@@ -20,20 +20,20 @@ export const toggleAt =
   (turn: number): Transform =>
   (state) => ({ ...state, position: turn < state.position ? turn : turn + 1 });
 
-/** Light a source: append a marker burning for `turns` turns from the current position. */
+/** Light a source: append a marker burning for `turns` turns from `startsAt` (default: now). */
 export const lightSource =
-  (preset: string, turns: number): Transform =>
+  (preset: string, turns: number, startsAt?: number): Transform =>
   (state) => ({
     ...state,
-    lights: [...state.lights, { preset, startsAt: state.position, duration: turns }],
+    lights: [...state.lights, { preset, startsAt: startsAt ?? state.position, duration: turns }],
   });
 
-/** Add an ad-hoc effect: append a labelled marker lasting `turns` turns from the current position. */
+/** Add an ad-hoc effect: append a labelled marker lasting `turns` turns from `startsAt` (default: now). */
 export const addEffect =
-  (label: string, turns: number): Transform =>
+  (label: string, turns: number, startsAt?: number): Transform =>
   (state) => ({
     ...state,
-    effects: [...state.effects, { label, startsAt: state.position, duration: turns }],
+    effects: [...state.effects, { label, startsAt: startsAt ?? state.position, duration: turns }],
   });
 
 /** Drop every marker that has already expired (its derived burn is spent). */

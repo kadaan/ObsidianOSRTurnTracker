@@ -14,6 +14,7 @@ import {
   resumeMarker,
 } from "./actions";
 import { TrackerState } from "./model";
+import { resolveMarker } from "./markers";
 
 describe("endTurn", () => {
   it("advances position by one turn, leaving other fields intact", () => {
@@ -59,6 +60,14 @@ describe("lightSource", () => {
     ]);
   });
 
+  it("starts the light at an explicit turn when given (e.g. placed from a timeline box)", () => {
+    const before: TrackerState = { position: 10, lights: [], effects: [] };
+
+    expect(lightSource("torch", 6, 50)(before).lights).toEqual([
+      { preset: "torch", startsAt: 50, duration: 6 },
+    ]);
+  });
+
   it("keeps existing lights", () => {
     const before: TrackerState = {
       position: 0,
@@ -76,6 +85,14 @@ describe("addEffect", () => {
 
     expect(addEffect("Poison", 3)(before).effects).toEqual([
       { label: "Poison", startsAt: 10, duration: 3 },
+    ]);
+  });
+
+  it("starts the effect at an explicit turn when given", () => {
+    const before: TrackerState = { position: 10, lights: [], effects: [] };
+
+    expect(addEffect("Poison", 3, 50)(before).effects).toEqual([
+      { label: "Poison", startsAt: 50, duration: 3 },
     ]);
   });
 });
@@ -263,8 +280,13 @@ describe("setRemaining", () => {
       effects: [],
     };
 
-    // duration becomes 2 → expiresAt 12 = position → expired now.
-    expect(setRemaining("light", 0, 0)(before).lights[0].duration).toBe(2);
+    const after = setRemaining("light", 0, 0)(before);
+
+    expect(after.lights[0].duration).toBe(2); // consumed, so expiresAt = 12 = position
+    expect(resolveMarker(after.lights[0], after.position)).toMatchObject({
+      phase: "expired",
+      remaining: 0,
+    });
   });
 
   it("keeps a paused marker's consumed burn frozen when setting remaining", () => {

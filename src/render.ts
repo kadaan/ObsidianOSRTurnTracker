@@ -1,5 +1,5 @@
 import { Menu, debounce, setIcon } from "obsidian";
-import { MarkerKind, TrackerState } from "./model";
+import { LightPreset, MarkerKind, TrackerState } from "./model";
 import { computeGrid } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerPhase, inSegments } from "./markers";
@@ -27,12 +27,30 @@ function openMenu(evt: MouseEvent, items: MenuItemSpec[]): void {
   menu.showAtMouseEvent(evt);
 }
 
+/** Menu item that lights a preset (control bar and box menu; `startsAt` defaults to the current turn). */
+const presetItem = (handlers: TrackerHandlers, p: LightPreset, startsAt?: number): MenuItemSpec => ({
+  title: p.label,
+  onClick: () => handlers.onLight(p.id, p.turns, startsAt),
+});
+
+/** Menu item that opens the Custom-effect dialog (`startsAt` defaults to the current turn). */
+const customItem = (handlers: TrackerHandlers, startsAt?: number): MenuItemSpec => ({
+  title: "Custom…",
+  onClick: () => handlers.onAddEffect(startsAt),
+});
+
+/** The turn a box event targets, or undefined if the event isn't over a box. */
+const boxTurnFrom = (evt: Event): number | undefined => {
+  const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
+  return boxEl?.dataset.turn === undefined ? undefined : Number(boxEl.dataset.turn);
+};
+
 export interface TrackerHandlers {
   onEndTurn: () => void;
   onAdvanceHours: (hours: number) => void;
   onBoxClick: (turn: number) => void;
-  onLight: (preset: string, turns: number) => void;
-  onAddEffect: () => void;
+  onLight: (preset: string, turns: number, startsAt?: number) => void;
+  onAddEffect: (startsAt?: number) => void;
   onClearExpired: () => void;
   onClearAll: () => void;
   onRemoveMarker: (kind: MarkerKind, index: number, label: string) => void;
@@ -113,11 +131,20 @@ export function renderTracker(
   const spanningNames = (rows: EffectRow[], turn: number) =>
     rows.filter((r) => inSegments(r.segments, turn)).map((r) => r.label);
 
-  // Box click → jump to that turn.
+  // Box click → jump to that turn; right-click → add a preset or custom marker starting on it.
   if (handlers) {
     root.addEventListener("click", (evt) => {
-      const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
-      if (boxEl?.dataset.turn !== undefined) handlers.onBoxClick(Number(boxEl.dataset.turn));
+      const turn = boxTurnFrom(evt);
+      if (turn !== undefined) handlers.onBoxClick(turn);
+    });
+    root.addEventListener("contextmenu", (evt) => {
+      const turn = boxTurnFrom(evt);
+      if (turn === undefined) return;
+      evt.preventDefault();
+      openMenu(evt, [
+        ...settings.presets.map((p) => presetItem(handlers, p, turn)),
+        customItem(handlers, turn),
+      ]);
     });
   }
 
@@ -261,16 +288,22 @@ function renderPanel(
     const timeEl = rowEl.createSpan({ cls: "osr-tt-effect-time", text: `${row.remaining}` });
     if (handlers) {
       // Click the turns-left number to set it — e.g. dialing in durations after adding effects.
-      inlineEdit(timeEl, {
-        value: `${row.remaining}`,
-        type: "number",
-        cls: "osr-tt-effect-time-edit",
-        onCommit: (v) => {
-          // Allow 0 — sets remaining to none, expiring the marker immediately.
-          const turns = Number(v);
-          if (Number.isInteger(turns) && turns >= 0) handlers.onSetRemaining(row.kind, row.index, turns);
-        },
-      });
+      // Not offered for expired markers (they have no remaining duration to adjust).
+      if (phase !== "expired") {
+        inlineEdit(timeEl, {
+          value: `${row.remaining}`,
+          type: "number",
+          cls: "osr-tt-effect-time-edit",
+          onCommit: (v) => {
+            // Allow 0 (expires immediately) but not a blank field — Number("") is 0, which would
+            // silently expire the marker on an accidental clear-and-blur.
+            const turns = Number(v);
+            if (v !== "" && Number.isInteger(turns) && turns >= 0) {
+              handlers.onSetRemaining(row.kind, row.index, turns);
+            }
+          },
+        });
+      }
 
       if (phase === "paused") {
         const play = rowEl.createSpan({ cls: "osr-tt-effect-play", attr: { "aria-label": "Resume" } });
@@ -345,13 +378,13 @@ function renderControls(
   else addSplitButton("End Turn", handlers.onEndTurn, advances);
 
   // Add-marker split button: primary lights the first preset, the caret nests the rest + Custom.
-  const custom: MenuItemSpec = { title: "Custom", onClick: handlers.onAddEffect };
+  const custom = customItem(handlers);
   if (settings.presets.length === 0) {
     addButton(custom.title, custom.onClick);
   } else {
     const [firstPreset, ...restPresets] = settings.presets;
     addSplitButton(firstPreset.label, () => handlers.onLight(firstPreset.id, firstPreset.turns), [
-      ...restPresets.map((p) => ({ title: p.label, onClick: () => handlers.onLight(p.id, p.turns) })),
+      ...restPresets.map((p) => presetItem(handlers, p)),
       custom,
     ]);
   }

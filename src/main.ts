@@ -75,13 +75,14 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
-        onLight: (preset, turns) => void this.mutateFromWidget(el, ctx, lightSource(preset, turns)),
-        onAddEffect: () =>
+        onLight: (preset, turns, startsAt) =>
+          void this.mutateFromWidget(el, ctx, lightSource(preset, turns, startsAt)),
+        onAddEffect: (startsAt) =>
           new EffectModal(
             this.app,
             { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
             (label, turns) => {
-              void this.mutateFromWidget(el, ctx, addEffect(label, turns));
+              void this.mutateFromWidget(el, ctx, addEffect(label, turns, startsAt));
               this.recordEffect(label, turns);
             },
           ).open(),
@@ -219,10 +220,11 @@ export default class OsrTurnTrackerPlugin extends Plugin {
 
   /** Copy the tracker as a `turn-tracker` code block, ready to paste into another note. */
   private async copyState(state: TrackerState): Promise<void> {
-    // Stamp the render origin at the current day's start so a pasted clone doesn't replay prior days.
+    // Stamp the render origin at the current day's start so a pasted clone doesn't replay prior days,
+    // and drop spent markers so the clone starts clean.
     const origin = dayOf(state.position) * TURNS_PER_DAY;
     try {
-      await navigator.clipboard.writeText(fenceTrackerBlock({ ...state, origin }));
+      await navigator.clipboard.writeText(fenceTrackerBlock({ ...clearExpired(state), origin }));
       new Notice("Tracker state copied to clipboard.");
     } catch {
       new Notice("OSR Turn Tracker: couldn't access the clipboard.");
