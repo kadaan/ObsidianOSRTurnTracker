@@ -65,6 +65,75 @@ describe("computeGrid", () => {
     expect(days[1].complete).toBe(false);
   });
 
+  it("places a chip on the light's last lit turn (expiresAt - 1), labelled by the preset glyph", () => {
+    const state: TrackerState = {
+      position: 0,
+      lights: [{ preset: "torch", expiresAt: 6 }],
+      effects: [],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[5].markers).toEqual([{ label: "T", count: 1, expired: false }]);
+    expect(boxes[6].markers).toEqual([]);
+  });
+
+  it("marks a chip expired once position passes the light's expiry, active while burning", () => {
+    const torch = { preset: "torch", expiresAt: 6 };
+    const chip = (position: number) =>
+      computeGrid({ position, lights: [torch], effects: [] })
+        .flatMap((d) => d.hours.flatMap((h) => h.boxes))[5].markers[0];
+
+    expect(chip(3).expired).toBe(false); // still burning
+    expect(chip(5).expired).toBe(false); // on the last lit turn, still burning
+    expect(chip(6).expired).toBe(true); // moved past the last lit turn
+  });
+
+  it("stacks same-turn same-glyph markers into one counted chip", () => {
+    const state: TrackerState = {
+      position: 0,
+      lights: [
+        { preset: "torch", expiresAt: 6 },
+        { preset: "torch", expiresAt: 6 },
+      ],
+      effects: [],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[5].markers).toEqual([{ label: "T", count: 2, expired: false }]);
+  });
+
+  it("keeps different glyphs on the same turn as separate chips", () => {
+    const state: TrackerState = {
+      position: 0,
+      lights: [
+        { preset: "torch", expiresAt: 6 },
+        { preset: "lantern", expiresAt: 6 },
+      ],
+      effects: [],
+    };
+
+    const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[5].markers).toHaveLength(2);
+  });
+
+  it("auto-grows the grid to include a marker beyond the current day", () => {
+    // position 0 would render only day 1; a lantern expiring at turn 200 (day 2) pulls day 2 in
+    const state: TrackerState = {
+      position: 0,
+      lights: [{ preset: "lantern", expiresAt: 200 }],
+      effects: [],
+    };
+
+    const days = computeGrid(state);
+
+    expect(days).toHaveLength(2);
+    const boxes = days.flatMap((d) => d.hours.flatMap((h) => h.boxes));
+    expect(boxes[199].markers).toHaveLength(1); // chip on the last lit turn (expiresAt - 1)
+  });
+
   it("labels hour rows 00:00 through 23:00", () => {
     const [day] = computeGrid(stateAt(0));
 

@@ -18,3 +18,11 @@ export const advanceHours = (hours: number): Transform => advanceTurns(hours * T
 export const toggleAt =
   (turn: number): Transform =>
   (state) => ({ ...state, position: turn < state.position ? turn : turn + 1 });
+
+/** Light a source: append a marker expiring `turns` turns after the current position. */
+export const lightSource =
+  (preset: string, turns: number): Transform =>
+  (state) => ({
+    ...state,
+    lights: [...state.lights, { preset, expiresAt: state.position + turns }],
+  });

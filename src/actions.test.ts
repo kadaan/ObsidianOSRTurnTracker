@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { endTurn, advanceHours, toggleAt } from "./actions";
+import { endTurn, advanceHours, toggleAt, lightSource } from "./actions";
 import { TrackerState } from "./model";
 
 describe("endTurn", () => {
@@ -34,6 +34,24 @@ describe("toggleAt", () => {
 
   it("clears to zero when the first filled box is clicked", () => {
     expect(toggleAt(0)(at(6)).position).toBe(0);
+  });
+});
+
+describe("lightSource", () => {
+  it("appends a light expiring `turns` ahead of the current position", () => {
+    const before: TrackerState = { position: 10, lights: [], effects: [] };
+
+    expect(lightSource("torch", 6)(before).lights).toEqual([{ preset: "torch", expiresAt: 16 }]);
+  });
+
+  it("keeps existing lights", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [{ preset: "lantern", expiresAt: 24 }],
+      effects: [],
+    };
+
+    expect(lightSource("torch", 6)(before).lights).toHaveLength(2);
   });
 });
 

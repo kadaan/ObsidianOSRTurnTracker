@@ -7,7 +7,7 @@ import {
 } from "obsidian";
 import { parseTrackerState } from "./parse";
 import { renderError, renderTracker } from "./render";
-import { advanceHours, endTurn, toggleAt } from "./actions";
+import { advanceHours, endTurn, lightSource, toggleAt } from "./actions";
 import { applyTrackerAction } from "./apply";
 import { BlockRange, findTrackerBlockAt } from "./block";
 import { DEFAULT_ADVANCE_SHORTCUTS, TRACKER_LANG, Transform } from "./model";
@@ -28,6 +28,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
+        onLight: (preset, turns) => void this.mutateFromWidget(el, ctx, lightSource(preset, turns)),
       });
     });
 

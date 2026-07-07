@@ -1,11 +1,12 @@
 import { setIcon } from "obsidian";
-import { DEFAULT_ADVANCE_SHORTCUTS, TrackerState } from "./model";
+import { DEFAULT_ADVANCE_SHORTCUTS, DEFAULT_LIGHT_PRESETS, TrackerState } from "./model";
 import { computeGrid } from "./grid";
 
 export interface TrackerHandlers {
   onEndTurn: () => void;
   onAdvanceHours: (hours: number) => void;
   onBoxClick: (turn: number) => void;
+  onLight: (preset: string, turns: number) => void;
 }
 
 /**
@@ -53,6 +54,13 @@ export function renderTracker(
           cls: `osr-tt-box is-${box.status}${handlers ? " is-clickable" : ""}`,
           attr: handlers ? { "data-turn": box.turn } : undefined,
         });
+        for (const chip of box.markers) {
+          const chipEl = boxes.createSpan({
+            cls: "osr-tt-chip",
+            text: chip.count > 1 ? `${chip.label}${chip.count}` : chip.label,
+          });
+          chipEl.toggleClass("is-expired", chip.expired);
+        }
       }
     }
   }
@@ -60,15 +68,15 @@ export function renderTracker(
 
 function renderControls(root: HTMLElement, handlers: TrackerHandlers): void {
   const controls = root.createDiv({ cls: "osr-tt-controls" });
+  const addButton = (text: string, onClick: () => void) =>
+    controls.createEl("button", { cls: "osr-tt-btn", text }).addEventListener("click", onClick);
 
-  controls
-    .createEl("button", { cls: "osr-tt-btn", text: "⏩ End Turn" })
-    .addEventListener("click", handlers.onEndTurn);
-
+  addButton("⏩ End Turn", handlers.onEndTurn);
   for (const hours of DEFAULT_ADVANCE_SHORTCUTS) {
-    controls
-      .createEl("button", { cls: "osr-tt-btn", text: `+${hours}h` })
-      .addEventListener("click", () => handlers.onAdvanceHours(hours));
+    addButton(`+${hours}h`, () => handlers.onAdvanceHours(hours));
+  }
+  for (const preset of DEFAULT_LIGHT_PRESETS) {
+    addButton(preset.label, () => handlers.onLight(preset.id, preset.turns));
   }
 }
 

@@ -126,12 +126,12 @@ a counted chip (`T` → `T2`).
 
 ### Acceptance criteria
 
-- [ ] Lighting a torch adds a chip 6 turns ahead; a lantern adds one 24 turns ahead.
-- [ ] Ending turns past a marker's `expiresAt` renders that chip dimmed (expired);
-      jumping back before it re-activates it.
-- [ ] The grid extends automatically to show the furthest active marker plus the
-      buffer; no "Add day" control exists.
-- [ ] Two same-type markers on the same turn render as a single counted chip (`T2`).
+- [~] Lighting a torch adds a chip 6 turns ahead; a lantern adds one 24 turns ahead. *(`lightSource` + chip placement unit-tested; button wiring needs a manual pass.)*
+- [~] Ending turns past a marker's `expiresAt` renders that chip dimmed (expired);
+      jumping back before it re-activates it. *(Derived `expired` (both directions) unit-tested; the dimmed render needs a manual pass.)*
+- [x] The grid extends automatically to show the furthest active marker plus the
+      buffer; no "Add day" control exists. *(Auto-grow horizon unit-tested; no Add-day control was ever added.)*
+- [x] Two same-type markers on the same turn render as a single counted chip (`T2`). *(Stacking count unit-tested; render composes `label+count`.)*
 
 ---
 

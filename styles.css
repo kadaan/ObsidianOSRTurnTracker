@@ -60,6 +60,23 @@
   opacity: 0.55;
 }
 
+/* Marker chips (light/effect) rendered at their expiry box. */
+.osr-tt-chip {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  font-weight: var(--font-bold);
+  color: var(--text-accent);
+  padding: 0 0.15em;
+  white-space: nowrap;
+}
+
+/* Expired markers: dimmed and italic. */
+.osr-tt-chip.is-expired {
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+  font-style: italic;
+}
+
 .osr-tt-hours {
   display: flex;
   flex-wrap: wrap;
