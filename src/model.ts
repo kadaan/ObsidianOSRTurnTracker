@@ -17,16 +17,12 @@ export interface LightPreset {
 }
 
 export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
-  { id: "torch", label: "Torch", marker: "T", turns: 6 },
-  { id: "lantern", label: "Lantern", marker: "L", turns: 24 },
+  { id: "torch", label: "Torch", marker: "torch", turns: 6 },
+  { id: "lantern", label: "Lantern", marker: "lantern", turns: 24 },
 ];
 
 /** Turns rendered past the furthest marker/position, for look-ahead. A setting later. */
 export const LOOKAHEAD_BUFFER = 6;
-
-/** The chip glyph for a light preset id (falls back to "?" for an unknown preset). */
-export const lightGlyph = (presetId: string, presets: LightPreset[] = DEFAULT_LIGHT_PRESETS): string =>
-  presets.find((p) => p.id === presetId)?.marker ?? "?";
 
 /** Which marker list a chip came from — its removal target. */
 export type MarkerKind = "light" | "effect";
@@ -44,15 +40,21 @@ export const TURNS_PER_DAY = TURNS_PER_HOUR * HOURS_PER_DAY; // 144
  */
 export const MAX_POSITION = 366 * TURNS_PER_DAY;
 
-/** A light source, driven by a preset. Its expiry is an absolute turn index. */
+/** A light source, driven by a preset. Turn indices are absolute. */
 export interface Light {
   preset: string;
+  /** Custom instance name (e.g. "Aragorn's torch"); absent → the preset's label is shown. */
+  label?: string;
+  /** Turn the light was lit. Absent on legacy markers → treated as turn 0 (never pending). */
+  startsAt?: number;
   expiresAt: number;
 }
 
-/** An ad-hoc timed effect with a free-text label. Expiry is an absolute turn index. */
+/** An ad-hoc timed effect with a free-text label. Turn indices are absolute. */
 export interface Effect {
   label: string;
+  /** Turn the effect began. Absent on legacy markers → treated as turn 0 (never pending). */
+  startsAt?: number;
   expiresAt: number;
 }
 

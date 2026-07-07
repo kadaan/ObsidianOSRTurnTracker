@@ -60,24 +60,110 @@
   opacity: 0.55;
 }
 
-/* Marker chips (light/effect) rendered at their expiry box. */
-.osr-tt-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.1em;
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  font-weight: var(--font-bold);
-  color: var(--text-accent);
-  padding: 0 0.15em;
-  white-space: nowrap;
+/* Box highlighted by a selected effect row. */
+.osr-tt-box.is-highlit {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
 }
 
-/* Expired markers: dimmed and italic. */
-.osr-tt-chip.is-expired {
+/* ── Effect panel ── */
+.osr-tt-panel {
+  margin-top: 0.75em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.osr-tt-panel-title {
+  font-weight: var(--font-semibold);
+  cursor: default;
+}
+
+details.osr-tt-panel-section > summary.osr-tt-panel-title {
+  cursor: pointer;
+}
+
+.osr-tt-effect {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 2px 4px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.osr-tt-effect:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.osr-tt-effect.is-selected {
+  background-color: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+
+/* Dimmed when hovering a timeline box this effect isn't active on. */
+.osr-tt-effect.is-dimmed {
+  opacity: 0.35;
+}
+
+.osr-tt-effect-name {
+  font-family: var(--font-monospace);
+  font-weight: var(--font-bold);
+  min-width: 3em;
+}
+
+/* Editable name and the input it becomes share ONE fixed-height box so swapping between them
+   never changes the row height (an <input> is a replaced element and won't flex-stretch, so a
+   matching explicit height is what keeps them identical). Negative margins reach the box to the
+   row's top, bottom, and left edges (cancelling the row's 2px/4px padding). */
+.osr-tt-effect-name.is-editable,
+input.osr-tt-effect-name-edit {
+  box-sizing: border-box;
+  height: 1.6em;
+  margin: -2px 0 -2px -4px;
+  padding: 0 2px 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.osr-tt-effect-name.is-editable {
+  display: flex;
+  align-items: center; /* keep the text centered in the taller box */
+}
+
+/* On hover / while editing, outline in the theme accent (purple here) with a field fill. */
+.osr-tt-effect-name.is-editable:hover,
+input.osr-tt-effect-name-edit {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-form-field, var(--background-primary));
+}
+
+input.osr-tt-effect-name-edit {
+  min-width: 6em;
+  font-family: var(--font-monospace);
+  font-weight: var(--font-bold);
+  font-size: inherit;
+}
+
+.osr-tt-effect-bar {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.osr-tt-effect-bar-fill {
+  height: 100%;
+  background-color: var(--interactive-accent);
+}
+
+.osr-tt-effect-time {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
   color: var(--text-muted);
-  font-weight: var(--font-normal);
-  font-style: italic;
+  min-width: 2em;
+  text-align: right;
 }
 
 .osr-tt-chip-x {
@@ -120,6 +206,50 @@
   border: 1px solid var(--text-muted);
   border-radius: 3px;
   box-sizing: border-box;
+  /* Center a count inside the fixed-size box so the grid never shifts. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-monospace);
+  font-size: 8px;
+  line-height: 1;
+  overflow: hidden;
+}
+
+/* Effect-span brackets, drawn on the boxes themselves.
+   in-span = bottom edge under the span; has-start = left edge; has-ending = right edge.
+   Rule order matters: span edges come after the status rules so they win their side. */
+.osr-tt-box.in-span {
+  border-bottom: 2px solid var(--text-accent);
+}
+
+.osr-tt-box.has-start {
+  border-left: 2px solid var(--text-accent);
+}
+
+/* The final block: no fill, dashed outline, accent right edge, count inside. */
+.osr-tt-box.has-ending {
+  background-color: transparent;
+  border-color: var(--text-muted);
+  border-style: dashed;
+  border-right: 2px solid var(--text-accent);
+  color: var(--text-muted);
+  font-weight: var(--font-bold);
+}
+
+/* Current turn with an ongoing effect: a light shade. */
+.osr-tt-box.is-current.in-span {
+  background-color: var(--background-modifier-hover);
+}
+
+/* The not-yet-elapsed part of a span: solid, high-contrast edges (vs accent for elapsed).
+   --text-normal reads near-white on dark themes and near-black on light ones. */
+.osr-tt-box.is-future.in-span {
+  border-bottom: 2px solid var(--text-normal);
+}
+
+.osr-tt-box.is-future.has-ending {
+  border-right: 2px solid var(--text-normal);
 }
 
 .osr-tt-box.is-past {

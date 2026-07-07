@@ -8,6 +8,7 @@ import {
   clearExpired,
   clearAll,
   removeMarker,
+  renameMarker,
 } from "./actions";
 import { TrackerState } from "./model";
 
@@ -50,7 +51,9 @@ describe("lightSource", () => {
   it("appends a light expiring `turns` ahead of the current position", () => {
     const before: TrackerState = { position: 10, lights: [], effects: [] };
 
-    expect(lightSource("torch", 6)(before).lights).toEqual([{ preset: "torch", expiresAt: 16 }]);
+    expect(lightSource("torch", 6)(before).lights).toEqual([
+      { preset: "torch", startsAt: 10, expiresAt: 16 },
+    ]);
   });
 
   it("keeps existing lights", () => {
@@ -68,7 +71,9 @@ describe("addEffect", () => {
   it("appends an effect expiring `turns` ahead of the current position", () => {
     const before: TrackerState = { position: 10, lights: [], effects: [] };
 
-    expect(addEffect("Poison", 3)(before).effects).toEqual([{ label: "Poison", expiresAt: 13 }]);
+    expect(addEffect("Poison", 3)(before).effects).toEqual([
+      { label: "Poison", startsAt: 10, expiresAt: 13 },
+    ]);
   });
 });
 
@@ -94,51 +99,126 @@ describe("clearExpired", () => {
 });
 
 describe("removeMarker", () => {
-  it("removes exactly one matching light, decrementing a stack", () => {
+  it("removes the light at the given index", () => {
     const before: TrackerState = {
       position: 0,
       lights: [
-        { preset: "torch", expiresAt: 6 },
-        { preset: "torch", expiresAt: 6 },
+        { preset: "torch", startsAt: 0, expiresAt: 6 },
+        { preset: "lantern", startsAt: 0, expiresAt: 24 },
       ],
       effects: [],
     };
 
-    expect(removeMarker("light", "torch", 6)(before).lights).toEqual([
-      { preset: "torch", expiresAt: 6 },
+    expect(removeMarker("light", 0)(before).lights).toEqual([
+      { preset: "lantern", startsAt: 0, expiresAt: 24 },
     ]);
   });
 
-  it("removes a matching effect", () => {
+  it("removes the effect at the given index", () => {
     const before: TrackerState = {
       position: 0,
       lights: [],
-      effects: [{ label: "Pn", expiresAt: 4 }],
+      effects: [{ label: "Pn", startsAt: 0, expiresAt: 4 }],
     };
 
-    expect(removeMarker("effect", "Pn", 4)(before).effects).toEqual([]);
+    expect(removeMarker("effect", 0)(before).effects).toEqual([]);
   });
 
-  it("disambiguates a light from an effect that share a glyph on the same turn", () => {
+  it("targets the exact instance among identical markers, leaving the rest", () => {
+    // Three identical torches: removing index 1 must leave the other two, untouched.
     const before: TrackerState = {
-      position: 0,
-      lights: [{ preset: "torch", expiresAt: 6 }], // glyph "T"
-      effects: [{ label: "T", expiresAt: 6 }], // literally labelled "T"
-    };
-
-    const afterEffect = removeMarker("effect", "T", 6)(before);
-    expect(afterEffect.lights).toEqual([{ preset: "torch", expiresAt: 6 }]); // torch untouched
-    expect(afterEffect.effects).toEqual([]); // only the effect removed
-  });
-
-  it("leaves state unchanged when nothing matches", () => {
-    const before: TrackerState = {
-      position: 0,
-      lights: [{ preset: "torch", expiresAt: 6 }],
+      position: 288,
+      lights: [
+        { preset: "torch", startsAt: 288, expiresAt: 294 },
+        { preset: "torch", label: "Torch - A", startsAt: 288, expiresAt: 294 },
+        { preset: "torch", startsAt: 288, expiresAt: 294 },
+      ],
       effects: [],
     };
 
-    expect(removeMarker("light", "lantern", 6)(before)).toBe(before);
+    expect(removeMarker("light", 1)(before).lights).toEqual([
+      { preset: "torch", startsAt: 288, expiresAt: 294 },
+      { preset: "torch", startsAt: 288, expiresAt: 294 },
+    ]);
+  });
+
+  it("leaves state unchanged for an out-of-range index", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [{ preset: "torch", startsAt: 0, expiresAt: 6 }],
+      effects: [],
+    };
+
+    expect(removeMarker("light", 5)(before)).toBe(before);
+  });
+});
+
+describe("renameMarker", () => {
+  it("sets a custom label on the light at the given index, keeping its preset", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [{ preset: "torch", startsAt: 0, expiresAt: 6 }],
+      effects: [],
+    };
+
+    expect(renameMarker("light", 0, "Aragorn's torch")(before).lights).toEqual([
+      { preset: "torch", label: "Aragorn's torch", startsAt: 0, expiresAt: 6 },
+    ]);
+  });
+
+  it("clears a light's custom label back to the preset default when the name is blank", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [{ preset: "torch", label: "Aragorn's torch", startsAt: 0, expiresAt: 6 }],
+      effects: [],
+    };
+
+    expect(renameMarker("light", 0, "  ")(before).lights).toEqual([
+      { preset: "torch", startsAt: 0, expiresAt: 6 },
+    ]);
+  });
+
+  it("renames the exact instance among identical markers, leaving already-labelled ones alone", () => {
+    // Reproduces the reported bug: renaming a plain torch must not touch "Torch - A".
+    const before: TrackerState = {
+      position: 288,
+      lights: [
+        { preset: "torch", label: "Torch - A", startsAt: 288, expiresAt: 294 },
+        { preset: "torch", startsAt: 288, expiresAt: 294 },
+        { preset: "torch", startsAt: 288, expiresAt: 294 },
+      ],
+      effects: [],
+    };
+
+    const after = renameMarker("light", 1, "Torch - B")(before);
+
+    expect(after.lights).toEqual([
+      { preset: "torch", label: "Torch - A", startsAt: 288, expiresAt: 294 },
+      { preset: "torch", label: "Torch - B", startsAt: 288, expiresAt: 294 },
+      { preset: "torch", startsAt: 288, expiresAt: 294 },
+    ]);
+  });
+
+  it("renames the effect at the given index", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [],
+      effects: [{ label: "Web", startsAt: 0, expiresAt: 12 }],
+    };
+
+    expect(renameMarker("effect", 0, "Giant Web")(before).effects).toEqual([
+      { label: "Giant Web", startsAt: 0, expiresAt: 12 },
+    ]);
+  });
+
+  it("leaves state unchanged for an out-of-range index", () => {
+    const before: TrackerState = {
+      position: 0,
+      lights: [{ preset: "torch", startsAt: 0, expiresAt: 6 }],
+      effects: [],
+    };
+
+    expect(renameMarker("light", 5, "x")(before)).toBe(before);
   });
 });
 

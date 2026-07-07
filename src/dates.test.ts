@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRealDate, makeDayHeader } from "./dates";
+import { formatRealDate, makeDayHeader, formatSpan } from "./dates";
 import { TrackerState } from "./model";
 
 describe("formatRealDate", () => {
@@ -34,5 +34,19 @@ describe("makeDayHeader", () => {
 
   it("falls back to 'Day N' when start is not a valid date", () => {
     expect(makeDayHeader(stateWith("not-a-date"))(0)).toBe("Day 1");
+  });
+});
+
+describe("formatSpan", () => {
+  const dayLabel = (d: number) => `Day ${d + 1}`;
+
+  it("shows only clock times when start and end are on the same day", () => {
+    // turn 108 → day 0, 18:00; turn 132 → day 0, 22:00
+    expect(formatSpan(108, 132, dayLabel)).toBe("18:00 → 22:00");
+  });
+
+  it("prefixes the day label when the span crosses a day boundary", () => {
+    // turn 138 → day 0, 23:00; turn 150 → day 1, 01:00
+    expect(formatSpan(138, 150, dayLabel)).toBe("Day 1 23:00 → Day 2 01:00");
   });
 });

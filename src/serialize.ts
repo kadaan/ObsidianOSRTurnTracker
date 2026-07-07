@@ -11,8 +11,14 @@ export function serializeTrackerState(state: TrackerState): string {
   if (state.start !== undefined) obj.start = state.start;
   if (state.calendar !== undefined) obj.calendar = state.calendar;
   obj.position = state.position;
-  if (state.lights.length > 0) obj.lights = state.lights;
-  if (state.effects.length > 0) obj.effects = state.effects;
+  // Emit markers ordered by start, then name, so the stored YAML matches the panel order.
+  if (state.lights.length > 0) obj.lights = sortMarkers(state.lights, (l) => l.preset);
+  if (state.effects.length > 0) obj.effects = sortMarkers(state.effects, (e) => e.label);
 
   return stringifyYaml(obj).trimEnd();
 }
+
+const sortMarkers = <T extends { startsAt?: number }>(markers: T[], name: (m: T) => string): T[] =>
+  [...markers].sort(
+    (a, b) => (a.startsAt ?? 0) - (b.startsAt ?? 0) || name(a).localeCompare(name(b)),
+  );

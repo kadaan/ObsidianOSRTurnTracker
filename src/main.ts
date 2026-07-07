@@ -20,6 +20,7 @@ import {
   endTurn,
   lightSource,
   removeMarker,
+  renameMarker,
   toggleAt,
 } from "./actions";
 import { applyTrackerAction } from "./apply";
@@ -73,8 +74,12 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           ).open(),
         onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
         onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
-        onRemoveMarker: (kind, key, expiresAt) =>
-          void this.mutateFromWidget(el, ctx, removeMarker(kind, key, expiresAt)),
+        onRemoveMarker: (kind, index, label) =>
+          new ConfirmModal(this.app, `Remove "${label}"?`, () =>
+            void this.mutateFromWidget(el, ctx, removeMarker(kind, index)),
+          ).open(),
+        onRenameMarker: (kind, index, name) =>
+          void this.mutateFromWidget(el, ctx, renameMarker(kind, index, name)),
       }, makeFantasyDayHeader(result.state, () => this.warnCalendar()));
     });
 
@@ -164,6 +169,34 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     if (this.calendarWarned) return;
     this.calendarWarned = true;
     new Notice("OSR Turn Tracker: couldn't read the Calendarium calendar — using default dates.");
+  }
+}
+
+/** A yes/no confirmation dialog; runs `onConfirm` only if the user confirms. */
+class ConfirmModal extends Modal {
+  constructor(
+    app: App,
+    private readonly message: string,
+    private readonly onConfirm: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.createEl("p", { text: this.message });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) => {
+        b.setButtonText("Remove").onClick(() => {
+          this.onConfirm();
+          this.close();
+        });
+        b.buttonEl.addClass("mod-warning");
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 

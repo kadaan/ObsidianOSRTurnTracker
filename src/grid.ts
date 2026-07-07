@@ -1,20 +1,14 @@
 import {
   TrackerState,
   TURNS_PER_HOUR,
-  MINUTES_PER_TURN,
   HOURS_PER_DAY,
   TURNS_PER_DAY,
-  lightGlyph,
   LOOKAHEAD_BUFFER,
   MAX_POSITION,
-  MarkerKind,
-  LightPreset,
-  DEFAULT_LIGHT_PRESETS,
 } from "./model";
-import { makeDayHeader } from "./dates";
+import { makeDayHeader, formatClock } from "./dates";
 
 export interface GridOptions {
-  presets?: LightPreset[];
   lookaheadBuffer?: number;
   /** Override the day-header text (e.g. a fantasy calendar); defaults to real-date / Day-N. */
   dayHeader?: (dayIndex: number) => string;
@@ -22,26 +16,17 @@ export interface GridOptions {
 
 export type BoxStatus = "past" | "current" | "future";
 
-/** A marker rendered on the box at its expiry turn. */
-export interface MarkerChip {
-  /** Display glyph, e.g. "T". */
-  label: string;
-  /** How many identical markers expire on this turn (rendered as "T2" when > 1). */
-  count: number;
-  expired: boolean;
-  /** Removal identity: which list, its key (preset id / effect label), and expiry turn. */
-  kind: MarkerKind;
-  key: string;
-  expiresAt: number;
-}
-
 export interface Box {
   /** Absolute turn index this box represents. */
   turn: number;
   /** past = elapsed; current = the "you are here" next turn; future = not yet reached. */
   status: BoxStatus;
-  /** Markers expiring on this turn. */
-  markers: MarkerChip[];
+  /** How many (non-pending) markers begin on this turn. */
+  startingCount: number;
+  /** How many (non-pending) markers have their last active turn here (expiresAt - 1). */
+  endingCount: number;
+  /** True when a (non-pending) marker's span [startsAt, expiresAt) covers this turn. */
+  spanned: boolean;
 }
 
 export interface HourRow {
@@ -61,57 +46,29 @@ export interface DayBlock {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Shared empty markers list for the many marker-less boxes (never mutated). */
-const NO_CHIPS: MarkerChip[] = [];
-
-/** Clock time (e.g. "02:20") for a number of turns into a day. */
-const formatClock = (turnsIntoDay: number): string =>
-  `${pad(Math.floor(turnsIntoDay / TURNS_PER_HOUR))}:${pad((turnsIntoDay % TURNS_PER_HOUR) * MINUTES_PER_TURN)}`;
-
-/** Group markers by expiry turn, keyed for quick per-box lookup. */
-function placeMarkers(state: TrackerState, presets: LightPreset[]): Map<number, MarkerChip[]> {
-  const marks = [
-    ...state.lights.map((l) => ({ label: lightGlyph(l.preset, presets), kind: "light" as const, key: l.preset, expiresAt: l.expiresAt })),
-    ...state.effects.map((e) => ({ label: e.label, kind: "effect" as const, key: e.label, expiresAt: e.expiresAt })),
-  ];
-
-  const byTurn = new Map<number, MarkerChip[]>();
-  for (const mark of marks) {
-    // The chip sits on the marker's last lit turn; it goes out on the next.
-    const chipTurn = mark.expiresAt - 1;
-    const chips = byTurn.get(chipTurn) ?? [];
-    // Group by removal identity, so a light and an effect sharing a glyph stay separate.
-    const existing = chips.find((c) => c.kind === mark.kind && c.key === mark.key);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      chips.push({
-        label: mark.label,
-        count: 1,
-        expired: state.position >= mark.expiresAt,
-        kind: mark.kind,
-        key: mark.key,
-        expiresAt: mark.expiresAt,
-      });
-    }
-    byTurn.set(chipTurn, chips);
-  }
-  return byTurn;
-}
-
 /** Compute the render model (day blocks → hour rows → boxes) from tracker state. */
 export function computeGrid(state: TrackerState, options: GridOptions = {}): DayBlock[] {
-  const presets = options.presets ?? DEFAULT_LIGHT_PRESETS;
   const buffer = options.lookaheadBuffer ?? LOOKAHEAD_BUFFER;
   const dayHeader = options.dayHeader ?? makeDayHeader(state);
 
   const days: DayBlock[] = [];
-  const chipsByTurn = placeMarkers(state, presets);
 
-  // Render whole days through the furthest of (position, any marker expiry) + buffer,
+  // Non-pending markers (already lit) drive the horizon and the per-box start/end counts.
+  // Pending markers (startsAt in the future, only reachable by rewinding) are excluded.
+  const live = [...state.lights, ...state.effects].filter((m) => state.position >= (m.startsAt ?? 0));
+  const startsOn = new Map<number, number>();
+  const endsOn = new Map<number, number>();
+  for (const m of live) {
+    startsOn.set(m.startsAt ?? 0, (startsOn.get(m.startsAt ?? 0) ?? 0) + 1);
+    endsOn.set(m.expiresAt - 1, (endsOn.get(m.expiresAt - 1) ?? 0) + 1);
+  }
+
+  // Render whole days through the furthest of (position, any live marker expiry) + buffer,
   // clamped so a hand-edited huge expiry can't explode the grid.
-  const expiries = state.lights.map((l) => l.expiresAt);
-  const horizon = Math.min(Math.max(state.position, ...expiries) + buffer, MAX_POSITION);
+  const horizon = Math.min(
+    Math.max(state.position, ...live.map((m) => m.expiresAt)) + buffer,
+    MAX_POSITION,
+  );
   const dayCount = Math.floor(horizon / TURNS_PER_DAY) + 1;
 
   for (let day = 0; day < dayCount; day++) {
@@ -122,7 +79,13 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
         const turn = day * TURNS_PER_DAY + hourOfDay * TURNS_PER_HOUR + t;
         const status: BoxStatus =
           turn < state.position ? "past" : turn === state.position ? "current" : "future";
-        boxes.push({ turn, status, markers: chipsByTurn.get(turn) ?? NO_CHIPS });
+        boxes.push({
+          turn,
+          status,
+          startingCount: startsOn.get(turn) ?? 0,
+          endingCount: endsOn.get(turn) ?? 0,
+          spanned: live.some((m) => (m.startsAt ?? 0) <= turn && turn < m.expiresAt),
+        });
       }
       hours.push({ label: `${pad(hourOfDay)}:00`, boxes });
     }

@@ -24,7 +24,7 @@ export const lightSource =
   (preset: string, turns: number): Transform =>
   (state) => ({
     ...state,
-    lights: [...state.lights, { preset, expiresAt: state.position + turns }],
+    lights: [...state.lights, { preset, startsAt: state.position, expiresAt: state.position + turns }],
   });
 
 /** Add an ad-hoc effect: append a labelled marker expiring `turns` after the current position. */
@@ -32,7 +32,7 @@ export const addEffect =
   (label: string, turns: number): Transform =>
   (state) => ({
     ...state,
-    effects: [...state.effects, { label, expiresAt: state.position + turns }],
+    effects: [...state.effects, { label, startsAt: state.position, expiresAt: state.position + turns }],
   });
 
 /** Drop every marker that has already expired (expiresAt at or behind the position). */
@@ -46,17 +46,40 @@ export const clearExpired: Transform = (state) => ({
 export const clearAll: Transform = (state) => ({ ...state, lights: [], effects: [] });
 
 /**
- * Remove one marker matching a chip's identity (list `kind`, `key` = preset id or
- * effect label, expiring at `expiresAt`). Removing one of a stack leaves the rest,
- * which re-render as a lower count.
+ * Remove the marker at `index` within its `kind`'s list. Targeting by position (rather than
+ * by value) addresses each instance unambiguously, even among identical markers. An
+ * out-of-range index is a no-op.
  */
 export const removeMarker =
-  (kind: MarkerKind, key: string, expiresAt: number): Transform =>
+  (kind: MarkerKind, index: number): Transform =>
   (state) => {
     if (kind === "light") {
-      const idx = state.lights.findIndex((l) => l.preset === key && l.expiresAt === expiresAt);
-      return idx === -1 ? state : { ...state, lights: state.lights.filter((_, i) => i !== idx) };
+      if (index < 0 || index >= state.lights.length) return state;
+      return { ...state, lights: state.lights.filter((_, i) => i !== index) };
     }
-    const idx = state.effects.findIndex((e) => e.label === key && e.expiresAt === expiresAt);
-    return idx === -1 ? state : { ...state, effects: state.effects.filter((_, i) => i !== idx) };
+    if (index < 0 || index >= state.effects.length) return state;
+    return { ...state, effects: state.effects.filter((_, i) => i !== index) };
+  };
+
+/**
+ * Rename the marker at `index` within its `kind`'s list. A light gets a custom instance
+ * `label` (a blank name clears it, reverting to the preset's default); an effect's own label
+ * is replaced (a blank name is a no-op, since effects have no default to fall back to).
+ */
+export const renameMarker =
+  (kind: MarkerKind, index: number, name: string): Transform =>
+  (state) => {
+    const trimmed = name.trim();
+
+    if (kind === "light") {
+      if (index < 0 || index >= state.lights.length) return state;
+      const { label: _drop, ...rest } = state.lights[index];
+      const renamed = trimmed ? { ...rest, label: trimmed } : rest;
+      return { ...state, lights: state.lights.map((l, i) => (i === index ? renamed : l)) };
+    }
+    if (index < 0 || index >= state.effects.length || !trimmed) return state;
+    return {
+      ...state,
+      effects: state.effects.map((e, i) => (i === index ? { ...e, label: trimmed } : e)),
+    };
   };

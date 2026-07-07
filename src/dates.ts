@@ -1,4 +1,27 @@
-import { TrackerState } from "./model";
+import { MINUTES_PER_TURN, TrackerState, TURNS_PER_DAY, TURNS_PER_HOUR } from "./model";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** Clock time (e.g. "02:20") for a number of turns into a day. */
+export function formatClock(turnsIntoDay: number): string {
+  return `${pad(Math.floor(turnsIntoDay / TURNS_PER_HOUR))}:${pad((turnsIntoDay % TURNS_PER_HOUR) * MINUTES_PER_TURN)}`;
+}
+
+/**
+ * Format a marker's [startsAt, expiresAt] span as clock times, prefixing each with its
+ * `dayLabel` only when the span crosses a day boundary (days shown only if needed).
+ */
+export function formatSpan(
+  startsAt: number,
+  expiresAt: number,
+  dayLabel: (dayIndex: number) => string,
+): string {
+  const dayOf = (turn: number) => Math.floor(turn / TURNS_PER_DAY);
+  const clockOf = (turn: number) => formatClock(((turn % TURNS_PER_DAY) + TURNS_PER_DAY) % TURNS_PER_DAY);
+  const crossesDays = dayOf(startsAt) !== dayOf(expiresAt);
+  const at = (turn: number) => (crossesDays ? `${dayLabel(dayOf(turn))} ${clockOf(turn)}` : clockOf(turn));
+  return `${at(startsAt)} → ${at(expiresAt)}`;
+}
 
 /** English ordinal suffix: 1→"st", 2→"nd", 3→"rd", 11→"th"… */
 function ordinal(n: number): string {

@@ -206,7 +206,52 @@ with the current day expanded by default.
 
 ---
 
-## Phase 8: Release — hygiene pass, versioning, workflow, README
+## Phase 8: Effect panel — `startsAt` model + active/expired lists
+
+**User stories / RFC decisions**: revises RFC decision 5/6 (markers rendered as in-grid
+chips → replaced by per-state effect lists) and adds `startsAt` to the marker schema
+(supersedes the "no start stored" implication of decision 2).
+
+### What to build
+
+Add `startsAt` to every marker (`{ preset|label, startsAt, expiresAt }`); `lightSource`
+and `addEffect` set `startsAt = position`. A marker's state is derived from `position`:
+**pending** (`position < startsAt`, only reachable by rewinding — hidden, and excluded
+from auto-grow), **active** (`startsAt ≤ position < expiresAt`), **expired**
+(`position ≥ expiresAt`). This fixes the rewind bug (jumping back before a marker was lit
+hides it; advancing past its start brings it back — reversible).
+
+**Remove the in-grid chips.** Instead render two tracker-wide sections under the controls:
+an **Active** list and a **collapsed Expired** list (grouped by state, not by day — so a
+marker spanning days lives in exactly one list). Lights and effects are **unified** in
+these lists. Markers are **grouped into one row per `(kind, key, startsAt, expiresAt)`** —
+identical name *and* identical start *and* end collapse into a single row with a **count**
+(same name+end but different start stays separate, since their progress differs). Each row
+shows the marker's name/glyph (with count when > 1), a **progress bar**
+(`(position − startsAt) / (expiresAt − startsAt)`), start / end / **turns remaining**
+(`expiresAt − position`), and a **remove ×** that removes one marker from the group
+(decrement-stack semantics; `removeMarker` keys on the full window incl. `startsAt`).
+**Clicking a row highlights** the boxes it spans (`[startsAt, expiresAt)`) on the timeline;
+clicking again (or another row) clears/moves the highlight. Highlight is ephemeral view state.
+
+### Acceptance criteria
+
+- [x] Markers store `startsAt`; `lightSource`/`addEffect` set it to `position`. Rewinding
+      before a marker's `startsAt` hides it and drops it from auto-grow; advancing back
+      past `startsAt` restores it (reversible, no data loss). *(startsAt-set, panel pending-hide, and auto-grow pending-exclusion all unit-tested.)*
+- [x] The **Active** list shows active lights + effects (unified) with a progress bar and
+      turns-remaining; the **Expired** list shows expired markers and is collapsed by default;
+      pending markers appear in neither. *(`computeEffectPanel` unit-tested; collapse is DOM.)*
+- [x] Markers with the same name, start, and end collapse into one row with a count;
+      differing starts (even with the same end) stay separate rows. *(Unit-tested.)*
+- [x] A row's **×** removes exactly one marker from that group (a count decrements);
+      `removeMarker` matches on the full window (kind, key, startsAt, expiresAt). *(`removeMarker` unit-tested incl. startsAt discrimination; × wiring is glue.)*
+- [~] Clicking a row highlights that marker's span on the timeline; clicking again clears it. *(Pure DOM — needs a manual pass.)*
+- [x] The old in-grid marker chips are gone. *(MarkerChip/placeMarkers/chip rendering removed; build clean.)*
+
+---
+
+## Phase 9: Release — hygiene pass, versioning, workflow, README
 
 **User stories / RFC decisions**: 11 (community-store readiness), 12 (README + legacy
 link).
