@@ -7,15 +7,15 @@ function stateAt(position: number): TrackerState {
 }
 
 describe("computeGrid", () => {
-  it("ticks the first `position` boxes and leaves the rest empty", () => {
+  it("marks the first `position` boxes past and the rest not", () => {
     const days = computeGrid(stateAt(14));
 
     const boxes = days.flatMap((d) => d.hours.flatMap((h) => h.boxes));
-    const ticked = boxes.filter((b) => b.ticked);
+    const past = boxes.filter((b) => b.status === "past");
 
-    expect(ticked).toHaveLength(14);
-    expect(boxes.slice(0, 14).every((b) => b.ticked)).toBe(true);
-    expect(boxes[14].ticked).toBe(false);
+    expect(past).toHaveLength(14);
+    expect(boxes.slice(0, 14).every((b) => b.status === "past")).toBe(true);
+    expect(boxes[14].status).toBe("current");
   });
 
   it("renders one full 24h day when position fits within it", () => {
@@ -34,7 +34,35 @@ describe("computeGrid", () => {
     expect(days.map((d) => d.header)).toEqual(["Day 1", "Day 2"]);
     const boxes = days.flatMap((d) => d.hours.flatMap((h) => h.boxes));
     expect(boxes).toHaveLength(288);
-    expect(boxes.filter((b) => b.ticked)).toHaveLength(150);
+    expect(boxes.filter((b) => b.status === "past")).toHaveLength(150);
+  });
+
+  it("classifies the boxes around `position` as past / current / future", () => {
+    const boxes = computeGrid(stateAt(14)).flatMap((d) => d.hours.flatMap((h) => h.boxes));
+
+    expect(boxes[13].status).toBe("past");
+    expect(boxes[14].status).toBe("current");
+    expect(boxes[15].status).toBe("future");
+  });
+
+  it("shows the current time on the in-progress day, computed from position", () => {
+    // position 14 → 2h 20m into day 1
+    expect(computeGrid(stateAt(14))[0].currentTime).toBe("02:20");
+  });
+
+  it("omits the current time on a completed day, shows it on the active one", () => {
+    // position 150 → day 1 fully elapsed; day 2 is 6 turns (1h) in
+    const days = computeGrid(stateAt(150));
+
+    expect(days[0].currentTime).toBeUndefined();
+    expect(days[1].currentTime).toBe("01:00");
+  });
+
+  it("marks fully-elapsed days complete and the in-progress day not", () => {
+    const days = computeGrid(stateAt(150)); // day 1 fully elapsed, day 2 active
+
+    expect(days[0].complete).toBe(true);
+    expect(days[1].complete).toBe(false);
   });
 
   it("labels hour rows 00:00 through 23:00", () => {

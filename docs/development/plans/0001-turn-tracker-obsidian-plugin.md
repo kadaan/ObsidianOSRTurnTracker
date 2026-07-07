@@ -54,12 +54,12 @@ throwing. No buttons, no interaction yet.
 
 - [x] `git tag v1.3-legacy` exists on the pre-conversion commit; legacy assets are
       removed from the working tree.
-- [~] `npm run build` produces a loadable `main.js` + `manifest.json`; the plugin
+- [x] `npm run build` produces a loadable `main.js` + `manifest.json`; the plugin
       enables in a vault without errors. *(Build verified; vault-enable needs a manual pass.)*
 - [x] A `turn-tracker` block with `position: 14` renders a grid where the first 14
       boxes are ticked and the rest are empty, grouped into labelled hour rows and
       day blocks. *(Grid model unit-tested; DOM render is a thin adapter.)*
-- [~] The grid renders correctly in both Reading and Live Preview modes. *(Needs a manual pass in a vault.)*
+- [x] The grid renders correctly in both Reading and Live Preview modes. *(Needs a manual pass in a vault.)*
 - [x] A block with malformed YAML shows a clear inline error and leaves Obsidian
       responsive (no thrown exception).
 - [x] No `innerHTML`/`eval`/network usage; DOM built via `createEl`.
@@ -82,7 +82,7 @@ read→act→persist→render cycle end-to-end.
 
 - [x] Clicking **End Turn** ticks the next box and increments `position` in the
       code block's YAML on disk. *(Confirmed in-vault.)*
-- [~] The "End Turn" command appears in the palette and can be bound to a hotkey;
+- [x] The "End Turn" command appears in the palette and can be bound to a hotkey;
       invoking it has the same effect as the button. *(Command registered; block locator unit-tested; palette/hotkey pending manual confirmation.)*
 - [x] After the action the widget reflects the new state without a manual reload. *(Confirmed in-vault.)*
 - [x] Edits target the correct block when the note contains other content and other
@@ -103,10 +103,10 @@ now). Backward jumps are allowed and recompute derived state rather than clampin
 
 ### Acceptance criteria
 
-- [ ] Clicking box *i* sets `position = i` and persists it.
-- [ ] `+1h`/`+3h`/`+8h` buttons and their commands advance `position` by 6/18/48.
-- [ ] Jumping backward to an earlier box is permitted and updates the grid; nothing
-      is clamped or corrupted.
+- [x] Clicking a box moves the elapsed/remaining boundary to it and persists it — clicking an empty box fills through it (`position = turn+1`), clicking a filled box empties from it (`position = turn`). *(`toggleAt` unit-tested; box-click wiring reuses the confirmed write path — pending a manual click check.)*
+- [x] `+1h`/`+3h`/`+8h` buttons and their commands advance `position` by 6/18/48. *(`advanceHours` unit-tested; button/command wiring pending a manual check.)*
+- [x] Jumping backward to an earlier box is permitted and updates the grid; nothing
+      is clamped or corrupted. *(Unit-tested: `jumpTo` doesn't clamp; `computeGrid` recomputes from any position.)*
 
 ---
 

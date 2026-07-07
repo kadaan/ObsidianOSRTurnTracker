@@ -7,10 +7,10 @@ import {
 } from "obsidian";
 import { parseTrackerState } from "./parse";
 import { renderError, renderTracker } from "./render";
-import { endTurn } from "./actions";
+import { advanceHours, endTurn, toggleAt } from "./actions";
 import { applyTrackerAction } from "./apply";
 import { BlockRange, findTrackerBlockAt } from "./block";
-import { TRACKER_LANG, Transform } from "./model";
+import { DEFAULT_ADVANCE_SHORTCUTS, TRACKER_LANG, Transform } from "./model";
 
 export default class OsrTurnTrackerPlugin extends Plugin {
   /** Serializes writes so rapid clicks can't race on a stale block snapshot. */
@@ -26,6 +26,8 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       }
       renderTracker(el, result.state, {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
+        onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
+        onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
       });
     });
 
@@ -34,6 +36,14 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       name: "End turn",
       editorCallback: (editor) => void this.mutateFromEditor(editor, endTurn),
     });
+
+    for (const hours of DEFAULT_ADVANCE_SHORTCUTS) {
+      this.addCommand({
+        id: `advance-${hours}h`,
+        name: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
+        editorCallback: (editor) => void this.mutateFromEditor(editor, advanceHours(hours)),
+      });
+    }
   }
 
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */

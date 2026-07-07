@@ -14,6 +14,8 @@
 
 .osr-tt-btn {
   cursor: pointer;
+  /* Grow to share the row width, wrapping to the next line when they run out of space. */
+  flex: 1 1 auto;
 }
 
 .osr-tt-day {
@@ -21,17 +23,53 @@
 }
 
 .osr-tt-day-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  cursor: pointer;
+  list-style: none;
   font-weight: var(--font-semibold);
   margin-bottom: 0.35em;
   padding-bottom: 0.15em;
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* Hide the native disclosure triangle; we draw our own chevron. */
+.osr-tt-day-header::-webkit-details-marker {
+  display: none;
+}
+
+.osr-tt-day-chevron {
+  color: var(--text-muted);
+  transition: transform 0.1s ease;
+}
+
+.osr-tt-day[open] > .osr-tt-day-header .osr-tt-day-chevron {
+  transform: rotate(90deg);
+}
+
+.osr-tt-day-time {
+  margin-left: auto; /* push to the right edge of the header */
+  font-family: var(--font-monospace);
+  font-weight: var(--font-normal);
+  color: var(--text-muted);
+}
+
+/* Fully-elapsed days: dimmed. */
+.osr-tt-day.is-complete {
+  opacity: 0.55;
+}
+
+.osr-tt-hours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em 1em; /* row-gap column-gap */
+}
+
 .osr-tt-hour {
   display: flex;
   align-items: center;
-  gap: 0.6em;
-  padding: 1px 0;
+  gap: 0.4em;
 }
 
 .osr-tt-hour-label {
@@ -54,9 +92,28 @@
   box-sizing: border-box;
 }
 
-.osr-tt-box.is-ticked {
+.osr-tt-box.is-past {
   background-color: var(--interactive-accent);
   border-color: var(--interactive-accent);
+}
+
+/* Current turn ("you are here"): a solid outline. */
+.osr-tt-box.is-current {
+  border-style: solid;
+  border-color: var(--text-normal);
+}
+
+/* Future turns: a dashed outline. */
+.osr-tt-box.is-future {
+  border-style: dashed;
+}
+
+.osr-tt-box.is-clickable {
+  cursor: pointer;
+}
+
+.osr-tt-box.is-clickable:hover {
+  border-color: var(--interactive-accent-hover);
 }
 
 .osr-tt-error {

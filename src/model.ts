@@ -3,8 +3,12 @@
 /** The code-block language / fence info-string that identifies a tracker. */
 export const TRACKER_LANG = "turn-tracker";
 
+/** Advance-shortcut buttons/commands, in hours. Becomes configurable in a later phase. */
+export const DEFAULT_ADVANCE_SHORTCUTS = [1, 3, 8];
+
 /** A turn is 10 minutes; these are enforced constants, never configurable. */
 export const TURNS_PER_HOUR = 6;
+export const MINUTES_PER_TURN = 60 / TURNS_PER_HOUR; // 10
 export const HOURS_PER_DAY = 24;
 export const TURNS_PER_DAY = TURNS_PER_HOUR * HOURS_PER_DAY; // 144
 
