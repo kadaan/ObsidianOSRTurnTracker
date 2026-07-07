@@ -12,6 +12,21 @@ const DIM_HOVER_DELAY_MS = 250;
 /** A panel row paired with its active burn segments, used to dim rows on box hover. */
 type DimRow = { el: HTMLElement; segments: Array<[number, number]> };
 
+/** An entry in a context or caret menu. */
+type MenuItemSpec = { title: string; icon?: string; onClick: () => void };
+
+/** Open a menu of `items` at the event's position. */
+function openMenu(evt: MouseEvent, items: MenuItemSpec[]): void {
+  const menu = new Menu();
+  for (const it of items) {
+    menu.addItem((item) => {
+      item.setTitle(it.title).onClick(it.onClick);
+      if (it.icon) item.setIcon(it.icon);
+    });
+  }
+  menu.showAtMouseEvent(evt);
+}
+
 export interface TrackerHandlers {
   onEndTurn: () => void;
   onAdvanceHours: (hours: number) => void;
@@ -123,11 +138,7 @@ export function renderTracker(
       // Right-click a day to copy the whole tracker as a code block, to paste into a new note.
       headerEl.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
-        const menu = new Menu();
-        menu.addItem((item) =>
-          item.setTitle("Copy tracker state").setIcon("copy").onClick(() => handlers.onCopyState()),
-        );
-        menu.showAtMouseEvent(evt);
+        openMenu(evt, [{ title: "Copy tracker state", icon: "copy", onClick: () => handlers.onCopyState() }]);
       });
     }
 
@@ -227,25 +238,19 @@ function renderPanel(
 
       rowEl.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
-        const menu = new Menu();
-        menu.addItem((item) => item.setTitle("Rename").setIcon("pencil").onClick(startRename));
+        const items: MenuItemSpec[] = [{ title: "Rename", icon: "pencil", onClick: startRename }];
         if (phase === "active" && row.pausable) {
-          menu.addItem((item) =>
-            item.setTitle("Pause").setIcon("pause").onClick(() => handlers.onPause(row.kind, row.index)),
-          );
+          items.push({ title: "Pause", icon: "pause", onClick: () => handlers.onPause(row.kind, row.index) });
         }
         if (phase === "paused") {
-          menu.addItem((item) =>
-            item.setTitle("Resume").setIcon("play").onClick(() => handlers.onResume(row.kind, row.index)),
-          );
+          items.push({ title: "Resume", icon: "play", onClick: () => handlers.onResume(row.kind, row.index) });
         }
-        menu.addItem((item) =>
-          item
-            .setTitle("Delete")
-            .setIcon("trash")
-            .onClick(() => handlers.onRemoveMarker(row.kind, row.index, row.label)),
-        );
-        menu.showAtMouseEvent(evt);
+        items.push({
+          title: "Delete",
+          icon: "trash",
+          onClick: () => handlers.onRemoveMarker(row.kind, row.index, row.label),
+        });
+        openMenu(evt, items);
       });
     }
 
@@ -261,8 +266,9 @@ function renderPanel(
         type: "number",
         cls: "osr-tt-effect-time-edit",
         onCommit: (v) => {
+          // Allow 0 — sets remaining to none, expiring the marker immediately.
           const turns = Number(v);
-          if (Number.isInteger(turns) && turns >= 1) handlers.onSetRemaining(row.kind, row.index, turns);
+          if (Number.isInteger(turns) && turns >= 0) handlers.onSetRemaining(row.kind, row.index, turns);
         },
       });
 
@@ -319,16 +325,40 @@ function renderControls(
   const addButton = (text: string, onClick: () => void) =>
     controls.createEl("button", { cls: "osr-tt-btn", text }).addEventListener("click", onClick);
 
-  addButton("⏩ End Turn", handlers.onEndTurn);
-  for (const hours of settings.advanceShortcuts) {
-    addButton(`+${hours}h`, () => handlers.onAdvanceHours(hours));
+  // A primary button joined to a caret that opens `items` as a menu.
+  const addSplitButton = (text: string, onClick: () => void, items: MenuItemSpec[]) => {
+    const split = controls.createDiv({ cls: "osr-tt-split" });
+    split
+      .createEl("button", { cls: "osr-tt-btn osr-tt-split-main", text })
+      .addEventListener("click", onClick);
+    const caret = split.createEl("button", { cls: "osr-tt-btn osr-tt-split-caret", attr: { "aria-label": "More…" } });
+    setIcon(caret, "chevron-down");
+    caret.addEventListener("click", (evt) => openMenu(evt, items));
+  };
+
+  // End Turn is the primary action; the caret advances by whole hours.
+  const advances = settings.advanceShortcuts.map((hours) => ({
+    title: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
+    onClick: () => handlers.onAdvanceHours(hours),
+  }));
+  if (advances.length === 0) addButton("End Turn", handlers.onEndTurn);
+  else addSplitButton("End Turn", handlers.onEndTurn, advances);
+
+  // Add-marker split button: primary lights the first preset, the caret nests the rest + Custom.
+  const custom: MenuItemSpec = { title: "Custom", onClick: handlers.onAddEffect };
+  if (settings.presets.length === 0) {
+    addButton(custom.title, custom.onClick);
+  } else {
+    const [firstPreset, ...restPresets] = settings.presets;
+    addSplitButton(firstPreset.label, () => handlers.onLight(firstPreset.id, firstPreset.turns), [
+      ...restPresets.map((p) => ({ title: p.label, onClick: () => handlers.onLight(p.id, p.turns) })),
+      custom,
+    ]);
   }
-  for (const preset of settings.presets) {
-    addButton(preset.label, () => handlers.onLight(preset.id, preset.turns));
-  }
-  addButton("+ Effect", handlers.onAddEffect);
-  addButton("Clear expired", handlers.onClearExpired);
-  addButton("Clear all", handlers.onClearAll);
+
+  addSplitButton("Clear expired", handlers.onClearExpired, [
+    { title: "Clear all", onClick: handlers.onClearAll },
+  ]);
 }
 
 /** Render a parse/validation error inline, keeping the note responsive. */

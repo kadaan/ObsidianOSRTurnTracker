@@ -256,6 +256,17 @@ describe("setRemaining", () => {
     expect(setRemaining("light", 0, 3)(before).lights[0].duration).toBe(3);
   });
 
+  it("expires the marker immediately when remaining is set to 0 (duration = consumed)", () => {
+    const before: TrackerState = {
+      position: 12,
+      lights: [{ preset: "torch", startsAt: 10, duration: 6 }], // consumed 2
+      effects: [],
+    };
+
+    // duration becomes 2 → expiresAt 12 = position → expired now.
+    expect(setRemaining("light", 0, 0)(before).lights[0].duration).toBe(2);
+  });
+
   it("keeps a paused marker's consumed burn frozen when setting remaining", () => {
     const before: TrackerState = {
       position: 20,

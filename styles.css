@@ -18,6 +18,33 @@
   flex: 1 1 auto;
 }
 
+/* Split button: "End Turn" (primary) joined to a caret that opens the +Xh advances. */
+.osr-tt-split {
+  display: flex;
+  flex: 1 1 auto;
+}
+
+.osr-tt-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.osr-tt-split-caret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.osr-tt-split-caret .svg-icon {
+  width: 1em;
+  height: 1em;
+}
+
 .osr-tt-day {
   margin-bottom: 0.75em;
 }

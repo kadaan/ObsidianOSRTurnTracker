@@ -1,4 +1,5 @@
 import {
+  AbstractInputSuggest,
   App,
   Editor,
   MarkdownPostProcessorContext,
@@ -43,6 +44,9 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   /** Notify at most once per session when a block's calendar can't be resolved. */
   private calendarWarned = false;
 
+  /** Per custom-effect-label usage: total count and a tally of the durations it was used with. */
+  private effectHistory: Record<string, EffectStat> = {};
+
   async onload() {
     // Validate each field against malformed/stale persisted data rather than trusting the shape.
     const loaded = (await this.loadData()) ?? {};
@@ -57,6 +61,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       lookaheadBuffer:
         typeof loaded.lookaheadBuffer === "number" ? loaded.lookaheadBuffer : defaults.lookaheadBuffer,
     };
+    this.effectHistory = normalizeEffectHistory(loaded.effectHistory);
     this.addSettingTab(new OsrSettingsTab(this.app, this));
 
     // Processors registered on the plugin are auto-detached on unload.
@@ -72,8 +77,13 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
         onLight: (preset, turns) => void this.mutateFromWidget(el, ctx, lightSource(preset, turns)),
         onAddEffect: () =>
-          new EffectModal(this.app, (label, turns) =>
-            void this.mutateFromWidget(el, ctx, addEffect(label, turns)),
+          new EffectModal(
+            this.app,
+            { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
+            (label, turns) => {
+              void this.mutateFromWidget(el, ctx, addEffect(label, turns));
+              this.recordEffect(label, turns);
+            },
           ).open(),
         onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
         onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
@@ -120,7 +130,36 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    await this.saveData({ ...this.settings, effectHistory: this.effectHistory });
+  }
+
+  /** Custom effect labels, most-used first (alphabetical within equal counts). */
+  private frequentEffectLabels(): string[] {
+    return Object.keys(this.effectHistory).sort(
+      (a, b) => this.effectHistory[b].count - this.effectHistory[a].count || a.localeCompare(b),
+    );
+  }
+
+  /**
+   * The duration to pre-fill for a label, when it's unambiguous — the single duration it's always
+   * been used with, or a strict most-common one. Returns undefined when there's no clear winner.
+   */
+  private durationFor(label: string): number | undefined {
+    const durations = this.effectHistory[label]?.durations;
+    if (!durations) return undefined;
+    const ranked = Object.entries(durations).sort((a, b) => b[1] - a[1]);
+    if (ranked.length === 0) return undefined;
+    if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return undefined; // tie → not clear
+    return Number(ranked[0][0]);
+  }
+
+  /** Bump a label's usage so it surfaces higher in suggestions and learns its typical duration. */
+  private recordEffect(label: string, turns: number): void {
+    const stat = this.effectHistory[label] ?? { count: 0, durations: {} };
+    stat.count += 1;
+    stat.durations[turns] = (stat.durations[turns] ?? 0) + 1;
+    this.effectHistory[label] = stat;
+    void this.saveSettings();
   }
 
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
@@ -219,6 +258,61 @@ class ConfirmModal extends Modal {
   }
 }
 
+/** Usage stats for one custom effect label: how often, and with which durations. */
+interface EffectStat {
+  /** Total uses. Stored (not derived from `durations`) so legacy entries migrated from the old
+   *  count-only format keep their suggestion ranking despite having no recorded durations. */
+  count: number;
+  durations: Record<string, number>;
+}
+
+/** What the Add-effect modal needs from history: ranked labels and a per-label duration hint. */
+interface EffectHistoryView {
+  labels: string[];
+  durationFor: (label: string) => number | undefined;
+}
+
+/** Coerce persisted history to the current shape, migrating the legacy `label → count` form. */
+function normalizeEffectHistory(raw: unknown): Record<string, EffectStat> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, EffectStat> = {};
+  for (const [label, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "number") out[label] = { count: value, durations: {} };
+    else if (value && typeof value === "object") {
+      const stat = value as { count?: unknown; durations?: unknown };
+      const durations: Record<string, number> = {};
+      if (stat.durations && typeof stat.durations === "object") {
+        for (const [d, c] of Object.entries(stat.durations)) {
+          if (typeof c === "number") durations[d] = c;
+        }
+      }
+      out[label] = { count: typeof stat.count === "number" ? stat.count : 0, durations };
+    }
+  }
+  return out;
+}
+
+/** Suggests previously-used effect labels (most-used first) as the user types. */
+class EffectLabelSuggest extends AbstractInputSuggest<string> {
+  constructor(
+    app: App,
+    inputEl: HTMLInputElement,
+    private readonly labels: string[],
+  ) {
+    super(app, inputEl);
+  }
+
+  protected getSuggestions(query: string): string[] {
+    if (!query) return []; // don't pop the list open on focus, only once the user types
+    const q = query.toLowerCase();
+    return this.labels.filter((label) => label.toLowerCase().includes(q));
+  }
+
+  renderSuggestion(label: string, el: HTMLElement): void {
+    el.setText(label);
+  }
+}
+
 /** Prompts for an ad-hoc effect's label and duration, then invokes `onSubmit`. */
 class EffectModal extends Modal {
   private label = "";
@@ -226,6 +320,7 @@ class EffectModal extends Modal {
 
   constructor(
     app: App,
+    private readonly history: EffectHistoryView,
     private readonly onSubmit: (label: string, turns: number) => void,
   ) {
     super(app);
@@ -234,13 +329,38 @@ class EffectModal extends Modal {
   onOpen(): void {
     this.contentEl.createEl("h3", { text: "Add effect" });
 
-    new Setting(this.contentEl).setName("Label").addText((t) =>
-      t.setPlaceholder("e.g. Poison").onChange((v) => (this.label = v.trim())),
-    );
+    let durationField: TextComponent;
+    let durationTouched = false;
+    // Pre-fill the duration for a known label, unless the user has already set one by hand.
+    const fillDuration = (label: string) => {
+      if (durationTouched) return;
+      const turns = this.history.durationFor(label);
+      if (turns === undefined) return;
+      this.turns = String(turns);
+      durationField.setValue(this.turns); // setValue doesn't fire onChange, so it stays "untouched"
+    };
+
+    new Setting(this.contentEl).setName("Label").addText((t) => {
+      t.setPlaceholder("e.g. Poison").onChange((v) => {
+        this.label = v.trim();
+        fillDuration(this.label);
+      });
+      const suggest = new EffectLabelSuggest(this.app, t.inputEl, this.history.labels);
+      suggest.onSelect((label) => {
+        t.setValue(label);
+        this.label = label;
+        fillDuration(label);
+        suggest.close();
+      });
+    });
     new Setting(this.contentEl).setName("Duration (turns)").addText((t) => {
+      durationField = t;
       t.inputEl.type = "number";
       t.inputEl.min = "1";
-      t.setValue(this.turns).onChange((v) => (this.turns = v));
+      t.setValue(this.turns).onChange((v) => {
+        this.turns = v;
+        durationTouched = true;
+      });
     });
     new Setting(this.contentEl).addButton((b) =>
       b.setButtonText("Add").setCta().onClick(() => this.submit()),

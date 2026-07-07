@@ -6,5 +6,8 @@ node_modules/
 main.js
 main.js.map
 
+# plugin runtime data (per-user settings / effect history), written by Obsidian
+data.json
+
 # test / coverage
 coverage/
