@@ -1,10 +1,16 @@
-import { Menu, setIcon } from "obsidian";
+import { Menu, debounce, setIcon } from "obsidian";
 import { MarkerKind, TrackerState } from "./model";
 import { computeGrid } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerPhase, inSegments } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
+
+/** How long the cursor must rest on a box before its non-active rows dim (avoids sweep flicker). */
+const DIM_HOVER_DELAY_MS = 250;
+
+/** A panel row paired with its active burn segments, used to dim rows on box hover. */
+type DimRow = { el: HTMLElement; segments: Array<[number, number]> };
 
 export interface TrackerHandlers {
   onEndTurn: () => void;
@@ -92,25 +98,13 @@ export function renderTracker(
   const spanningNames = (rows: EffectRow[], turn: number) =>
     rows.filter((r) => inSegments(r.segments, turn)).map((r) => r.label);
 
-  // Box click → jump; box hover → dim list rows not active on that turn.
+  // Box click → jump to that turn.
   if (handlers) {
     root.addEventListener("click", (evt) => {
       const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
       if (boxEl?.dataset.turn !== undefined) handlers.onBoxClick(Number(boxEl.dataset.turn));
     });
   }
-  // Panel rows with their burn segments, so hovering a box can dim the rows not active on it.
-  const dimRows: Array<{ el: HTMLElement; segments: Array<[number, number]> }> = [];
-  root.addEventListener("mouseover", (evt) => {
-    const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
-    if (!boxEl) return;
-    const turn = Number(boxEl.dataset.turn);
-    for (const { el, segments } of dimRows) el.toggleClass("is-dimmed", !inSegments(segments, turn));
-  });
-  root.addEventListener("mouseout", (evt) => {
-    if (!(evt.target as HTMLElement).closest(".osr-tt-box")) return;
-    for (const { el } of dimRows) el.removeClass("is-dimmed");
-  });
 
   const grid = computeGrid(state, { lookaheadBuffer: settings.lookaheadBuffer, dayHeader: dayHeaderFn });
   for (const day of grid) {
@@ -168,19 +162,40 @@ export function renderTracker(
   // The button bar sits directly above the effect panel.
   if (handlers) renderControls(root, handlers, settings);
 
-  renderPanel(root, panel, dayHeaderFn, dimRows, handlers);
+  const dimRows = renderPanel(root, panel, dayHeaderFn, handlers);
+
+  // Resting on a box dims the panel rows not active on that turn. Debounced so a fast sweep across
+  // boxes never dims; cleared only when the cursor leaves the whole tracker (not on box-to-box
+  // moves), so it doesn't flicker on and off.
+  const dimOnHover = debounce(
+    (turn: number) => dimRows.forEach(({ el, segments }) => el.toggleClass("is-dimmed", !inSegments(segments, turn))),
+    DIM_HOVER_DELAY_MS,
+    true,
+  );
+  root.addEventListener("mouseover", (evt) => {
+    const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
+    if (boxEl) dimOnHover(Number(boxEl.dataset.turn));
+    else dimOnHover.cancel(); // moved off the boxes → don't dim for a turn we've left
+  });
+  root.addEventListener("mouseleave", () => {
+    dimOnHover.cancel();
+    dimRows.forEach(({ el }) => el.removeClass("is-dimmed"));
+  });
 }
 
-/** Render the Active / Paused / Upcoming / Expired effect lists below the controls. */
+/**
+ * Render the Active / Paused / Upcoming / Expired effect lists below the controls, returning each
+ * row paired with its burn segments so the caller can wire box-hover dimming.
+ */
 function renderPanel(
   root: HTMLElement,
   { active, paused, upcoming, expired }: EffectPanel,
   dayHeader: (dayIndex: number) => string,
-  dimRows: Array<{ el: HTMLElement; segments: Array<[number, number]> }>,
   handlers?: TrackerHandlers,
-): void {
-  if (active.length + paused.length + upcoming.length + expired.length === 0) return;
+): DimRow[] {
+  if (active.length + paused.length + upcoming.length + expired.length === 0) return [];
 
+  const dimRows: DimRow[] = [];
   const panelEl = root.createDiv({ cls: "osr-tt-panel" });
 
   // Click a row to paint its active burn segments on the grid; click again to clear.
@@ -291,6 +306,8 @@ function renderPanel(
   section("Paused", paused, "paused", false);
   section("Upcoming", upcoming, "upcoming", true);
   section("Expired", expired, "expired", true);
+
+  return dimRows;
 }
 
 function renderControls(
