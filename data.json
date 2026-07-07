@@ -1,0 +1,22 @@
+{
+  "presets": [
+    {
+      "id": "torch",
+      "label": "Torch",
+      "marker": "T",
+      "turns": 6
+    },
+    {
+      "id": "lantern",
+      "label": "Lantern",
+      "marker": "L",
+      "turns": 24
+    }
+  ],
+  "advanceShortcuts": [
+    1,
+    3,
+    8
+  ],
+  "lookaheadBuffer": 6
+}

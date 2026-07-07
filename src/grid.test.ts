@@ -172,6 +172,20 @@ describe("computeGrid", () => {
     expect(boxes[2].markers[0].label).toBe("C");
   });
 
+  it("uses real-date headers when the state has a datetime start", () => {
+    const state: TrackerState = { start: "2016-05-21T08:00", position: 0, lights: [], effects: [] };
+
+    const header = computeGrid(state)[0].header;
+    expect(header).not.toBe("Day 1");
+    expect(header).toContain("2016");
+  });
+
+  it("honors a dayHeader override (e.g. a fantasy calendar)", () => {
+    const state: TrackerState = { position: 0, lights: [], effects: [] };
+
+    expect(computeGrid(state, { dayHeader: (i) => `Fantasy ${i}` })[0].header).toBe("Fantasy 0");
+  });
+
   it("labels hour rows 00:00 through 23:00", () => {
     const [day] = computeGrid(stateAt(0));
 

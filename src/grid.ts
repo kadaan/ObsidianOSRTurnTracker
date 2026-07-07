@@ -11,10 +11,13 @@ import {
   LightPreset,
   DEFAULT_LIGHT_PRESETS,
 } from "./model";
+import { makeDayHeader } from "./dates";
 
 export interface GridOptions {
   presets?: LightPreset[];
   lookaheadBuffer?: number;
+  /** Override the day-header text (e.g. a fantasy calendar); defaults to real-date / Day-N. */
+  dayHeader?: (dayIndex: number) => string;
 }
 
 export type BoxStatus = "past" | "current" | "future";
@@ -100,6 +103,7 @@ function placeMarkers(state: TrackerState, presets: LightPreset[]): Map<number, 
 export function computeGrid(state: TrackerState, options: GridOptions = {}): DayBlock[] {
   const presets = options.presets ?? DEFAULT_LIGHT_PRESETS;
   const buffer = options.lookaheadBuffer ?? LOOKAHEAD_BUFFER;
+  const dayHeader = options.dayHeader ?? makeDayHeader(state);
 
   const days: DayBlock[] = [];
   const chipsByTurn = placeMarkers(state, presets);
@@ -128,7 +132,7 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
     const inProgress = turnOfDay >= 0 && turnOfDay < TURNS_PER_DAY;
     const currentTime = inProgress ? formatClock(turnOfDay) : undefined;
 
-    days.push({ header: `Day ${day + 1}`, hours, currentTime, complete: turnOfDay >= TURNS_PER_DAY });
+    days.push({ header: dayHeader(day), hours, currentTime, complete: turnOfDay >= TURNS_PER_DAY });
   }
 
   return days;

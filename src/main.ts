@@ -27,6 +27,7 @@ import { BlockRange, findTrackerBlockAt } from "./block";
 import { serializeTrackerState } from "./serialize";
 import { seedTrackerState } from "./seed";
 import { LightPreset, TRACKER_LANG, Transform } from "./model";
+import { makeFantasyDayHeader } from "./calendarium";
 import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
 
 export default class OsrTurnTrackerPlugin extends Plugin {
@@ -34,6 +35,9 @@ export default class OsrTurnTrackerPlugin extends Plugin {
 
   /** Serializes writes so rapid clicks can't race on a stale block snapshot. */
   private applying = false;
+
+  /** Notify at most once per session when a block's calendar can't be resolved. */
+  private calendarWarned = false;
 
   async onload() {
     // Validate each field against malformed/stale persisted data rather than trusting the shape.
@@ -71,7 +75,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
         onRemoveMarker: (kind, key, expiresAt) =>
           void this.mutateFromWidget(el, ctx, removeMarker(kind, key, expiresAt)),
-      });
+      }, makeFantasyDayHeader(result.state, () => this.warnCalendar()));
     });
 
     this.addCommand({
@@ -154,6 +158,12 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     } finally {
       this.applying = false;
     }
+  }
+
+  private warnCalendar(): void {
+    if (this.calendarWarned) return;
+    this.calendarWarned = true;
+    new Notice("OSR Turn Tracker: couldn't read the Calendarium calendar — using default dates.");
   }
 }
 

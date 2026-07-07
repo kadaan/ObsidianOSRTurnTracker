@@ -24,6 +24,7 @@ export function renderTracker(
   state: TrackerState,
   settings: OsrTurnTrackerSettings,
   handlers?: TrackerHandlers,
+  dayHeader?: (dayIndex: number) => string,
 ): void {
   container.empty();
   const root = container.createDiv({ cls: "osr-tt" });
@@ -40,6 +41,7 @@ export function renderTracker(
   const grid = computeGrid(state, {
     presets: settings.presets,
     lookaheadBuffer: settings.lookaheadBuffer,
+    dayHeader,
   });
   for (const day of grid) {
     // Completed days collapse (click to expand) and dim; the active day stays open.
