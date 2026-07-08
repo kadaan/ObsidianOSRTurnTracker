@@ -1,5 +1,15 @@
 import { parse as parseYaml } from "yaml";
-import { CUSTOM_TYPE, Failure, Marker, MAX_POSITION, Note, Pause, TrackerState } from "./model";
+import {
+  CUSTOM_TYPE,
+  Failure,
+  LEGACY_EFFECT_KEYS,
+  Marker,
+  MAX_POSITION,
+  Note,
+  Pause,
+  TOP_LEVEL_KEYS,
+  TrackerState,
+} from "./model";
 
 export type ParseResult = { ok: true; state: TrackerState } | Failure;
 
@@ -10,6 +20,9 @@ function fail(message: string): Failure {
 const isNonNegativeInt = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0;
 
+/** Every top-level key the block understands (including the legacy `effects` aliases, still read). */
+const KNOWN_KEYS = new Set<string>([...TOP_LEVEL_KEYS, ...LEGACY_EFFECT_KEYS]);
+
 /** Parse the YAML body of a `turn-tracker` code block into tracker state. */
 export function parseTrackerState(source: string): ParseResult {
   let raw: unknown;
@@ -19,7 +32,14 @@ export function parseTrackerState(source: string): ParseResult {
     return fail(e instanceof Error ? e.message : String(e));
   }
 
+  if (raw !== undefined && raw !== null && (typeof raw !== "object" || Array.isArray(raw))) {
+    return fail("the block must be a set of key: value fields.");
+  }
   const obj = (raw ?? {}) as Record<string, unknown>;
+
+  // Reject typos and stray keys (e.g. `pos tion:`) rather than silently dropping them.
+  const unknown = Object.keys(obj).find((key) => !KNOWN_KEYS.has(key));
+  if (unknown) return fail(`unknown field "${unknown}".`);
 
   const position = obj.position ?? 0;
   if (!isNonNegativeInt(position)) return fail(`"position" must be a non-negative whole number.`);

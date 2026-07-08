@@ -12,15 +12,15 @@ export interface LightPreset {
   label: string;
   /** Lucide icon id shown beside the preset in menus (mobile only — desktop native menus omit icons). */
   icon?: string;
-  /** Duration in turns. */
-  turns: number;
+  /** Duration expression in turns — a plain number ("6") or dice ("2d6+1"), rolled when lit. */
+  turns: string;
   /** Whether instances of this preset can be paused/resumed (freezing their burn). */
   pausable?: boolean;
 }
 
 export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
-  { id: "torch", label: "Torch", icon: "flame", turns: 6, pausable: true },
-  { id: "lantern", label: "Lantern", icon: "lamp", turns: 24, pausable: true },
+  { id: "torch", label: "Torch", icon: "flame", turns: "6", pausable: true },
+  { id: "lantern", label: "Lantern", icon: "lamp", turns: "24", pausable: true },
 ];
 
 /** Icon used for a preset with no `icon` set — also the default for newly-created presets. */
@@ -31,6 +31,12 @@ export const LOOKAHEAD_BUFFER = 6;
 
 /** The `type` of an ad-hoc effect — one with a free-text label and no preset behind it. */
 export const CUSTOM_TYPE = "custom";
+
+/** Top-level keys a block understands, in the order one is usually written. */
+export const TOP_LEVEL_KEYS = ["position", "start", "calendar", "origin", "effects", "notes"] as const;
+
+/** Legacy aliases for `effects`, still parsed for older blocks. */
+export const LEGACY_EFFECT_KEYS = ["lights", "markers"] as const;
 
 /** A turn is 10 minutes; these are enforced constants, never configurable. */
 export const TURNS_PER_HOUR = 6;

@@ -13,7 +13,8 @@ export interface BlockRange {
   lineEnd: number;
 }
 
-const OPEN_FENCE = new RegExp(`^\`{3,}\\s*${TRACKER_LANG}\\s*$`);
+/** A fence line (trimmed) that opens a `turn-tracker` block. Shared with the editor autocomplete. */
+export const OPEN_FENCE = new RegExp(`^\`{3,}\\s*${TRACKER_LANG}\\s*$`);
 const CLOSE_FENCE = /^`{3,}\s*$/;
 
 /** All `turn-tracker` fenced blocks in the text, as fence line ranges. */

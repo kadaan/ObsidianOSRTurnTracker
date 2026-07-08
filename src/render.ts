@@ -31,7 +31,7 @@ function openMenu(evt: MouseEvent, items: MenuItemSpec[]): void {
 const presetItem = (handlers: TrackerHandlers, p: LightPreset, startsAt?: number): MenuItemSpec => ({
   title: p.label,
   icon: p.icon || PRESET_FALLBACK_ICON,
-  onClick: () => handlers.onLight(p.id, p.turns, startsAt),
+  onClick: () => handlers.onLight(p.id, startsAt),
 });
 
 /** Menu item that opens the Custom-effect dialog (`startsAt` defaults to the current turn). */
@@ -61,7 +61,7 @@ export interface TrackerHandlers {
   onEndTurn: () => void;
   onAdvanceHours: (hours: number) => void;
   onBoxClick: (turn: number) => void;
-  onLight: (preset: string, turns: number, startsAt?: number) => void;
+  onLight: (presetId: string, startsAt?: number) => void;
   onAddEffect: (startsAt?: number) => void;
   onClearExpired: () => void;
   onClearAll: () => void;
@@ -461,7 +461,7 @@ function renderControls(
     addButton(custom.title, custom.onClick);
   } else {
     const [firstPreset, ...restPresets] = settings.presets;
-    addSplitButton(firstPreset.label, () => handlers.onLight(firstPreset.id, firstPreset.turns), [
+    addSplitButton(firstPreset.label, () => handlers.onLight(firstPreset.id), [
       ...restPresets.map((p) => presetItem(handlers, p)),
       custom,
     ]);

@@ -1,5 +1,48 @@
 # Changelog
 
+## [2.0.2]
+
+- Presets can now use **dice durations** (e.g. `2d6+1`), rolled each time the light is lit.
+- Preset management: edit a preset's fields in a modal, **reorder** presets (the first is the widget's
+  default button), **reset** to the built-in defaults, and see each preset's icon in the list.
+- **Promote** a learned custom effect into a preset; forgetting an effect (or all of them) now confirms
+  first.
+- Add/Save is disabled until inputs are valid — a label/name is set and the duration is a valid number
+  or dice formula — and preset names must be unique.
+- A duration that rolls under 1 turn is skipped (a valid "it wore off" result) rather than placed on the
+  timeline; roll notices now name the effect or preset.
+
+## [2.0.1]
+
+- Calendarium fantasy dates now advance in the calendar's own units — leap days and intercalary months
+  are handled by Calendarium, so multi-day spans stay accurate — and the `start` date is parsed through
+  Calendarium's own parser.
+- Added an optional setting to sync the tracker's current day back to Calendarium's current date
+  (disabled when Calendarium isn't installed).
+- Fixed the effect-panel selection highlight not showing on touch devices.
+
+## [2.0.0]
+
+First release as a native Obsidian plugin — a complete rewrite of the Templater/Meta-Bind tool
+(preserved at the [`v1.3-legacy`](../../releases/tag/v1.3-legacy) tag). No ITS Theme, Templater,
+Meta-Bind, or JS Engine required.
+
+- The tracker is a `turn-tracker` fenced code block rendered as an interactive widget; its YAML is
+  the single source of truth and is rewritten in place on each action.
+- **End Turn** and **advance by hours** as buttons and hotkey-able commands; click any box to jump the
+  elapsed/remaining boundary (backward jumps allowed and reversible).
+- Lights and effects are unified. Ships with Torch (6) and Lantern (24) presets; add ad-hoc effects
+  with a label and a duration — a number or dice (e.g. `2d6+1`), rolled when added.
+- **Pause/resume** pausable markers, **rename** an instance, and **set the remaining turns** inline.
+- An Active / Paused / Upcoming / Expired panel shows each marker's progress and turns remaining; click
+  a row to highlight its span on the timeline. Box tooltips name each turn's start / stop / pause / resume.
+- **Notes** anchored to a turn (full Markdown), grouped under a collapsible per-day list.
+- **Copy tracker state** from a day's menu to paste a clean continuation into a new session note.
+- Day headers in three modes — `Day N`, real dates, or a Calendarium fantasy calendar; days are
+  collapsible.
+- Settings: editable presets, configurable advance shortcuts and look-ahead buffer, and a learned
+  custom-effect history with autocomplete and duration pre-fill.
+
 ## [1.3]
 - Tracker will now start at "Day 1", 8am, when no `startTime` property is provided.
 - Added optional `fc-calendar` property parsing, to display fantasy weekday and month names from Calendarium plugin.

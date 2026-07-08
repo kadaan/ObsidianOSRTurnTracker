@@ -14,6 +14,8 @@ describe("applyTrackerAction", () => {
     expect(result.newText).not.toContain("position: 14");
     expect(result.newText.startsWith("intro\n")).toBe(true);
     expect(result.newText.trimEnd().endsWith("outro")).toBe(true);
+    expect(result.before.position).toBe(14);
+    expect(result.after.position).toBe(15);
   });
 
   it("reports the parse error instead of writing when the block is malformed", () => {

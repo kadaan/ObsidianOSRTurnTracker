@@ -36,6 +36,17 @@ function parseDuration(input: string): ParsedDuration | undefined {
   return { dice: true, count, sides, modifier };
 }
 
+/**
+ * Whether `input` is a usable duration expression — a whole number ≥ 1, or dice notation. Does not
+ * roll (safe for per-keystroke validation). A dice expression is "valid" here even if a given roll
+ * could come out ≤ 0; the caller checks the actual rolled total.
+ */
+export function isValidDuration(input: string): boolean {
+  const p = parseDuration(input);
+  if (!p) return false;
+  return p.dice || p.value >= 1;
+}
+
 /** Canonical text for a parsed expression, so equivalent inputs ("2d6 + 1", "06") share a key. */
 function canonical(p: ParsedDuration): string {
   if (!p.dice) return String(p.value);

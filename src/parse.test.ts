@@ -36,4 +36,22 @@ describe("parseTrackerState", () => {
     if (!result.ok) return;
     expect(result.state.position).toBe(0);
   });
+
+  it("rejects an unknown field (e.g. a mistyped key) naming the offender", () => {
+    const result = parseTrackerState("pos tion: 5");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("pos tion");
+  });
+
+  it("still accepts the legacy lights/markers keys", () => {
+    expect(parseTrackerState("lights: []").ok).toBe(true);
+    expect(parseTrackerState("markers: []").ok).toBe(true);
+  });
+
+  it("rejects a block that isn't a mapping", () => {
+    expect(parseTrackerState("- just\n- a list").ok).toBe(false);
+    expect(parseTrackerState("42").ok).toBe(false);
+  });
 });
