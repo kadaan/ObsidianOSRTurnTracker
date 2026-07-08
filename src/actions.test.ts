@@ -12,6 +12,9 @@ import {
   setRemaining,
   pauseMarker,
   resumeMarker,
+  addNote,
+  editNote,
+  removeNote,
 } from "./actions";
 import { TrackerState } from "./model";
 import { resolveMarker } from "./markers";
@@ -21,20 +24,19 @@ describe("endTurn", () => {
     const before: TrackerState = {
       calendar: "Greyhawk",
       position: 14,
-      lights: [{ preset: "torch", duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", duration: 6 }],
     };
 
     const after = endTurn(before);
 
     expect(after.position).toBe(15);
     expect(after.calendar).toBe("Greyhawk");
-    expect(after.lights).toEqual([{ preset: "torch", duration: 6 }]);
+    expect(after.markers).toEqual([{ type: "torch", duration: 6 }]);
   });
 });
 
 describe("toggleAt", () => {
-  const at = (position: number): TrackerState => ({ position, lights: [], effects: [] });
+  const at = (position: number): TrackerState => ({ position, markers: [] });
 
   it("fills through a clicked empty box (box and all before it)", () => {
     // position 6 → click empty box 8 → boxes 0..8 filled → position 9
@@ -52,47 +54,46 @@ describe("toggleAt", () => {
 });
 
 describe("lightSource", () => {
-  it("appends a light starting at the current position with the given duration", () => {
-    const before: TrackerState = { position: 10, lights: [], effects: [] };
+  it("appends a preset marker starting at the current position with the given duration", () => {
+    const before: TrackerState = { position: 10, markers: [] };
 
-    expect(lightSource("torch", 6)(before).lights).toEqual([
-      { preset: "torch", startsAt: 10, duration: 6 },
+    expect(lightSource("torch", 6)(before).markers).toEqual([
+      { type: "torch", startsAt: 10, duration: 6 },
     ]);
   });
 
-  it("starts the light at an explicit turn when given (e.g. placed from a timeline box)", () => {
-    const before: TrackerState = { position: 10, lights: [], effects: [] };
+  it("starts the marker at an explicit turn when given (e.g. placed from a timeline box)", () => {
+    const before: TrackerState = { position: 10, markers: [] };
 
-    expect(lightSource("torch", 6, 50)(before).lights).toEqual([
-      { preset: "torch", startsAt: 50, duration: 6 },
+    expect(lightSource("torch", 6, 50)(before).markers).toEqual([
+      { type: "torch", startsAt: 50, duration: 6 },
     ]);
   });
 
-  it("keeps existing lights", () => {
+  it("keeps existing markers", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [{ preset: "lantern", duration: 24 }],
-      effects: [],
+      markers: [{ type: "lantern", duration: 24 }],
     };
 
-    expect(lightSource("torch", 6)(before).lights).toHaveLength(2);
+    expect(lightSource("torch", 6)(before).markers).toHaveLength(2);
   });
 });
 
 describe("addEffect", () => {
-  it("appends an effect starting at the current position with the given duration", () => {
-    const before: TrackerState = { position: 10, lights: [], effects: [] };
+  it("appends a custom marker starting at the current position with the given duration", () => {
+    const before: TrackerState = { position: 10, markers: [] };
 
-    expect(addEffect("Poison", 3)(before).effects).toEqual([
-      { label: "Poison", startsAt: 10, duration: 3 },
+    expect(addEffect("Poison", 3)(before).markers).toEqual([
+      { type: "custom", label: "Poison", startsAt: 10, duration: 3 },
     ]);
   });
 
   it("starts the effect at an explicit turn when given", () => {
-    const before: TrackerState = { position: 10, lights: [], effects: [] };
+    const before: TrackerState = { position: 10, markers: [] };
 
-    expect(addEffect("Poison", 3, 50)(before).effects).toEqual([
-      { label: "Poison", startsAt: 50, duration: 3 },
+    expect(addEffect("Poison", 3, 50)(before).markers).toEqual([
+      { type: "custom", label: "Poison", startsAt: 50, duration: 3 },
     ]);
   });
 });
@@ -101,110 +102,94 @@ describe("clearExpired", () => {
   it("removes markers whose burn is spent, keeping active ones", () => {
     const before: TrackerState = {
       position: 10,
-      lights: [
-        { preset: "torch", duration: 6 }, // expired (burns turns 0-6)
-        { preset: "lantern", duration: 20 }, // active
-      ],
-      effects: [
-        { label: "Pn", duration: 10 }, // expired (burns turns 0-10)
-        { label: "Web", duration: 15 }, // active
+      markers: [
+        { type: "torch", duration: 6 }, // expired (burns turns 0-6)
+        { type: "lantern", duration: 20 }, // active
+        { type: "custom", label: "Pn", duration: 10 }, // expired (burns turns 0-10)
+        { type: "custom", label: "Web", duration: 15 }, // active
       ],
     };
 
     const after = clearExpired(before);
 
-    expect(after.lights).toEqual([{ preset: "lantern", duration: 20 }]);
-    expect(after.effects).toEqual([{ label: "Web", duration: 15 }]);
+    expect(after.markers).toEqual([
+      { type: "lantern", duration: 20 },
+      { type: "custom", label: "Web", duration: 15 },
+    ]);
   });
 
   it("keeps a paused marker even when its scheduled expiry is behind the position", () => {
     const before: TrackerState = {
       position: 10,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
     };
 
-    expect(clearExpired(before).lights).toHaveLength(1);
+    expect(clearExpired(before).markers).toHaveLength(1);
   });
 });
 
 describe("removeMarker", () => {
-  it("removes the light at the given index", () => {
+  it("removes the marker at the given index", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [
-        { preset: "torch", startsAt: 0, duration: 6 },
-        { preset: "lantern", startsAt: 0, duration: 24 },
+      markers: [
+        { type: "torch", startsAt: 0, duration: 6 },
+        { type: "lantern", startsAt: 0, duration: 24 },
       ],
-      effects: [],
     };
 
-    expect(removeMarker("light", 0)(before).lights).toEqual([
-      { preset: "lantern", startsAt: 0, duration: 24 },
+    expect(removeMarker(0)(before).markers).toEqual([
+      { type: "lantern", startsAt: 0, duration: 24 },
     ]);
-  });
-
-  it("removes the effect at the given index", () => {
-    const before: TrackerState = {
-      position: 0,
-      lights: [],
-      effects: [{ label: "Pn", startsAt: 0, duration: 4 }],
-    };
-
-    expect(removeMarker("effect", 0)(before).effects).toEqual([]);
   });
 
   it("targets the exact instance among identical markers, leaving the rest", () => {
     // Three identical torches: removing index 1 must leave the other two, untouched.
     const before: TrackerState = {
       position: 288,
-      lights: [
-        { preset: "torch", startsAt: 288, duration: 6 },
-        { preset: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
-        { preset: "torch", startsAt: 288, duration: 6 },
+      markers: [
+        { type: "torch", startsAt: 288, duration: 6 },
+        { type: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
+        { type: "torch", startsAt: 288, duration: 6 },
       ],
-      effects: [],
     };
 
-    expect(removeMarker("light", 1)(before).lights).toEqual([
-      { preset: "torch", startsAt: 288, duration: 6 },
-      { preset: "torch", startsAt: 288, duration: 6 },
+    expect(removeMarker(1)(before).markers).toEqual([
+      { type: "torch", startsAt: 288, duration: 6 },
+      { type: "torch", startsAt: 288, duration: 6 },
     ]);
   });
 
   it("leaves state unchanged for an out-of-range index", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6 }],
     };
 
-    expect(removeMarker("light", 5)(before)).toBe(before);
+    expect(removeMarker(5)(before)).toBe(before);
   });
 });
 
 describe("renameMarker", () => {
-  it("sets a custom label on the light at the given index, keeping its preset", () => {
+  it("sets a custom label on a preset marker, keeping its type", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6 }],
     };
 
-    expect(renameMarker("light", 0, "Aragorn's torch")(before).lights).toEqual([
-      { preset: "torch", label: "Aragorn's torch", startsAt: 0, duration: 6 },
+    expect(renameMarker(0, "Aragorn's torch")(before).markers).toEqual([
+      { type: "torch", label: "Aragorn's torch", startsAt: 0, duration: 6 },
     ]);
   });
 
-  it("clears a light's custom label back to the preset default when the name is blank", () => {
+  it("clears a preset marker's label back to the default when the name is blank", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [{ preset: "torch", label: "Aragorn's torch", startsAt: 0, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", label: "Aragorn's torch", startsAt: 0, duration: 6 }],
     };
 
-    expect(renameMarker("light", 0, "  ")(before).lights).toEqual([
-      { preset: "torch", startsAt: 0, duration: 6 },
+    expect(renameMarker(0, "  ")(before).markers).toEqual([
+      { type: "torch", startsAt: 0, duration: 6 },
     ]);
   });
 
@@ -212,43 +197,49 @@ describe("renameMarker", () => {
     // Reproduces the reported bug: renaming a plain torch must not touch "Torch - A".
     const before: TrackerState = {
       position: 288,
-      lights: [
-        { preset: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
-        { preset: "torch", startsAt: 288, duration: 6 },
-        { preset: "torch", startsAt: 288, duration: 6 },
+      markers: [
+        { type: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
+        { type: "torch", startsAt: 288, duration: 6 },
+        { type: "torch", startsAt: 288, duration: 6 },
       ],
-      effects: [],
     };
 
-    const after = renameMarker("light", 1, "Torch - B")(before);
+    const after = renameMarker(1, "Torch - B")(before);
 
-    expect(after.lights).toEqual([
-      { preset: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
-      { preset: "torch", label: "Torch - B", startsAt: 288, duration: 6 },
-      { preset: "torch", startsAt: 288, duration: 6 },
+    expect(after.markers).toEqual([
+      { type: "torch", label: "Torch - A", startsAt: 288, duration: 6 },
+      { type: "torch", label: "Torch - B", startsAt: 288, duration: 6 },
+      { type: "torch", startsAt: 288, duration: 6 },
     ]);
   });
 
-  it("renames the effect at the given index", () => {
+  it("replaces a custom marker's label", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [],
-      effects: [{ label: "Web", startsAt: 0, duration: 12 }],
+      markers: [{ type: "custom", label: "Web", startsAt: 0, duration: 12 }],
     };
 
-    expect(renameMarker("effect", 0, "Giant Web")(before).effects).toEqual([
-      { label: "Giant Web", startsAt: 0, duration: 12 },
+    expect(renameMarker(0, "Giant Web")(before).markers).toEqual([
+      { type: "custom", label: "Giant Web", startsAt: 0, duration: 12 },
     ]);
+  });
+
+  it("is a no-op when a custom marker is renamed to blank (its label is its only name)", () => {
+    const before: TrackerState = {
+      position: 0,
+      markers: [{ type: "custom", label: "Web", startsAt: 0, duration: 12 }],
+    };
+
+    expect(renameMarker(0, "  ")(before)).toBe(before);
   });
 
   it("leaves state unchanged for an out-of-range index", () => {
     const before: TrackerState = {
       position: 0,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6 }],
     };
 
-    expect(renameMarker("light", 5, "x")(before)).toBe(before);
+    expect(renameMarker(5, "x")(before)).toBe(before);
   });
 });
 
@@ -256,34 +247,31 @@ describe("setRemaining", () => {
   it("adjusts duration so the marker has the given turns left, preserving consumed", () => {
     const before: TrackerState = {
       position: 12,
-      lights: [{ preset: "torch", startsAt: 10, duration: 6 }], // consumed 2, remaining 4
-      effects: [],
+      markers: [{ type: "torch", startsAt: 10, duration: 6 }], // consumed 2, remaining 4
     };
 
-    expect(setRemaining("light", 0, 10)(before).lights[0].duration).toBe(12); // 2 + 10
+    expect(setRemaining(0, 10)(before).markers[0].duration).toBe(12); // 2 + 10
   });
 
   it("sets the duration directly for a freshly-created marker (nothing consumed yet)", () => {
     const before: TrackerState = {
       position: 10,
-      lights: [{ preset: "torch", startsAt: 10, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 10, duration: 6 }],
     };
 
-    expect(setRemaining("light", 0, 3)(before).lights[0].duration).toBe(3);
+    expect(setRemaining(0, 3)(before).markers[0].duration).toBe(3);
   });
 
   it("expires the marker immediately when remaining is set to 0 (duration = consumed)", () => {
     const before: TrackerState = {
       position: 12,
-      lights: [{ preset: "torch", startsAt: 10, duration: 6 }], // consumed 2
-      effects: [],
+      markers: [{ type: "torch", startsAt: 10, duration: 6 }], // consumed 2
     };
 
-    const after = setRemaining("light", 0, 0)(before);
+    const after = setRemaining(0, 0)(before);
 
-    expect(after.lights[0].duration).toBe(2); // consumed, so expiresAt = 12 = position
-    expect(resolveMarker(after.lights[0], after.position)).toMatchObject({
+    expect(after.markers[0].duration).toBe(2); // consumed, so expiresAt = 12 = position
+    expect(resolveMarker(after.markers[0], after.position)).toMatchObject({
       phase: "expired",
       remaining: 0,
     });
@@ -292,45 +280,42 @@ describe("setRemaining", () => {
   it("keeps a paused marker's consumed burn frozen when setting remaining", () => {
     const before: TrackerState = {
       position: 20,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }], // consumed 3
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }], // consumed 3
     };
 
-    expect(setRemaining("light", 0, 5)(before).lights[0].duration).toBe(8); // 3 + 5
+    expect(setRemaining(0, 5)(before).markers[0].duration).toBe(8); // 3 + 5
   });
 
   it("leaves state unchanged for an out-of-range index", () => {
-    const before: TrackerState = { position: 0, lights: [], effects: [] };
+    const before: TrackerState = { position: 0, markers: [] };
 
-    expect(setRemaining("light", 0, 5)(before)).toBe(before);
+    expect(setRemaining(0, 5)(before)).toBe(before);
   });
 });
 
 describe("pauseMarker", () => {
-  it("records a pause at the current position on the light at the given index", () => {
+  it("records a pause at the current position on the marker at the given index", () => {
     const before: TrackerState = {
       position: 291,
-      lights: [{ preset: "torch", startsAt: 288, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 288, duration: 6 }],
     };
 
-    expect(pauseMarker("light", 0)(before).lights[0].pauses).toEqual([{ at: 291 }]);
+    expect(pauseMarker(0)(before).markers[0].pauses).toEqual([{ at: 291 }]);
   });
 
   it("is a no-op when the marker is already paused", () => {
     const before: TrackerState = {
       position: 291,
-      lights: [{ preset: "torch", startsAt: 288, duration: 6, pauses: [{ at: 290 }] }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 288, duration: 6, pauses: [{ at: 290 }] }],
     };
 
-    expect(pauseMarker("light", 0)(before)).toBe(before);
+    expect(pauseMarker(0)(before)).toBe(before);
   });
 
   it("leaves state unchanged for an out-of-range index", () => {
-    const before: TrackerState = { position: 0, lights: [], effects: [] };
+    const before: TrackerState = { position: 0, markers: [] };
 
-    expect(pauseMarker("light", 0)(before)).toBe(before);
+    expect(pauseMarker(0)(before)).toBe(before);
   });
 });
 
@@ -338,42 +323,104 @@ describe("resumeMarker", () => {
   it("closes the open pause at the current position", () => {
     const before: TrackerState = {
       position: 300,
-      lights: [{ preset: "torch", startsAt: 288, duration: 6, pauses: [{ at: 291 }] }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 288, duration: 6, pauses: [{ at: 291 }] }],
     };
 
-    expect(resumeMarker("light", 0)(before).lights[0].pauses).toEqual([{ at: 291, until: 300 }]);
+    expect(resumeMarker(0)(before).markers[0].pauses).toEqual([{ at: 291, until: 300 }]);
   });
 
   it("is a no-op when the marker is not paused", () => {
     const before: TrackerState = {
       position: 300,
-      lights: [{ preset: "torch", startsAt: 288, duration: 6 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 288, duration: 6 }],
     };
 
-    expect(resumeMarker("light", 0)(before)).toBe(before);
+    expect(resumeMarker(0)(before)).toBe(before);
+  });
+});
+
+describe("addNote", () => {
+  it("appends a note at the current position", () => {
+    const before: TrackerState = { position: 42, markers: [] };
+
+    expect(addNote("Party rests")(before).notes).toEqual([{ at: 42, text: "Party rests" }]);
+  });
+
+  it("anchors the note at an explicit turn when given (e.g. from a timeline box)", () => {
+    const before: TrackerState = { position: 42, markers: [] };
+
+    expect(addNote("Trap sprung", 10)(before).notes).toEqual([{ at: 10, text: "Trap sprung" }]);
+  });
+
+  it("keeps existing notes", () => {
+    const before: TrackerState = {
+      position: 5,
+      markers: [],
+      notes: [{ at: 1, text: "start" }],
+    };
+
+    expect(addNote("next", 5)(before).notes).toHaveLength(2);
+  });
+});
+
+describe("editNote", () => {
+  it("replaces the text of the note at the given index", () => {
+    const before: TrackerState = {
+      position: 0,
+      markers: [],
+      notes: [{ at: 3, text: "old" }],
+    };
+
+    expect(editNote(0, "new")(before).notes).toEqual([{ at: 3, text: "new" }]);
+  });
+
+  it("leaves state unchanged for an out-of-range index", () => {
+    const before: TrackerState = { position: 0, markers: [], notes: [] };
+
+    expect(editNote(0, "x")(before)).toBe(before);
+  });
+});
+
+describe("removeNote", () => {
+  it("removes the note at the given index", () => {
+    const before: TrackerState = {
+      position: 0,
+      markers: [],
+      notes: [
+        { at: 1, text: "a" },
+        { at: 2, text: "b" },
+      ],
+    };
+
+    expect(removeNote(0)(before).notes).toEqual([{ at: 2, text: "b" }]);
+  });
+
+  it("leaves state unchanged for an out-of-range index", () => {
+    const before: TrackerState = { position: 0, markers: [], notes: [{ at: 1, text: "a" }] };
+
+    expect(removeNote(9)(before)).toBe(before);
   });
 });
 
 describe("clearAll", () => {
-  it("empties both marker lists, leaving position untouched", () => {
+  it("empties the marker list, leaving position untouched", () => {
     const before: TrackerState = {
       position: 5,
-      lights: [{ preset: "torch", duration: 11 }],
-      effects: [{ label: "Pn", duration: 8 }],
+      markers: [
+        { type: "torch", duration: 11 },
+        { type: "custom", label: "Pn", duration: 8 },
+      ],
     };
 
     const after = clearAll(before);
 
-    expect(after.lights).toEqual([]);
-    expect(after.effects).toEqual([]);
+    expect(after.markers).toEqual([]);
     expect(after.position).toBe(5);
   });
 });
 
 describe("advanceHours", () => {
-  const base: TrackerState = { position: 10, lights: [], effects: [] };
+  const base: TrackerState = { position: 10, markers: [] };
 
   it("advances position by hours × 6 turns", () => {
     expect(advanceHours(1)(base).position).toBe(16);

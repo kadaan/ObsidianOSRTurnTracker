@@ -1,6 +1,6 @@
 import { Menu, debounce, setIcon } from "obsidian";
-import { LightPreset, MarkerKind, TrackerState } from "./model";
-import { computeGrid } from "./grid";
+import { LightPreset, TrackerState } from "./model";
+import { computeGrid, DayNote } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerPhase, inSegments } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
@@ -39,6 +39,14 @@ const customItem = (handlers: TrackerHandlers, startsAt?: number): MenuItemSpec 
   onClick: () => handlers.onAddEffect(startsAt),
 });
 
+/** Append a "×" delete chip that runs `onDelete` (stopping propagation so it doesn't also select). */
+function deleteChip(parent: HTMLElement, onDelete: () => void): void {
+  parent.createSpan({ cls: "osr-tt-chip-x", text: "×" }).addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    onDelete();
+  });
+}
+
 /** The turn a box event targets, or undefined if the event isn't over a box. */
 const boxTurnFrom = (evt: Event): number | undefined => {
   const boxEl = (evt.target as HTMLElement).closest<HTMLElement>(".osr-tt-box");
@@ -53,12 +61,15 @@ export interface TrackerHandlers {
   onAddEffect: (startsAt?: number) => void;
   onClearExpired: () => void;
   onClearAll: () => void;
-  onRemoveMarker: (kind: MarkerKind, index: number, label: string) => void;
-  onRenameMarker: (kind: MarkerKind, index: number, name: string) => void;
-  onPause: (kind: MarkerKind, index: number) => void;
-  onResume: (kind: MarkerKind, index: number) => void;
-  onSetRemaining: (kind: MarkerKind, index: number, turns: number) => void;
+  onRemoveMarker: (index: number, label: string) => void;
+  onRenameMarker: (index: number, name: string) => void;
+  onPause: (index: number) => void;
+  onResume: (index: number) => void;
+  onSetRemaining: (index: number, turns: number) => void;
   onCopyState: () => void;
+  onAddNote: (at?: number) => void;
+  onEditNote: (index: number, text: string) => void;
+  onDeleteNote: (index: number) => void;
 }
 
 /**
@@ -119,6 +130,7 @@ export function renderTracker(
   settings: OsrTurnTrackerSettings,
   handlers?: TrackerHandlers,
   dayHeader?: (dayIndex: number) => string,
+  renderMarkdown?: (el: HTMLElement, text: string) => void,
 ): void {
   container.empty();
   const root = container.createDiv({ cls: "osr-tt" });
@@ -144,6 +156,7 @@ export function renderTracker(
       openMenu(evt, [
         ...settings.presets.map((p) => presetItem(handlers, p, turn)),
         customItem(handlers, turn),
+        { title: "Note…", icon: "pencil", onClick: () => handlers.onAddNote(turn) },
       ]);
     });
   }
@@ -195,6 +208,8 @@ export function renderTracker(
         if (parts.length) boxEl.setAttribute("title", parts.join(" · "));
       }
     }
+
+    renderDayNotes(dayEl, day.notes, handlers, renderMarkdown);
   }
 
   // The button bar sits directly above the effect panel.
@@ -219,6 +234,43 @@ export function renderTracker(
     dimOnHover.cancel();
     dimRows.forEach(({ el }) => el.removeClass("is-dimmed"));
   });
+}
+
+/** Render a day's notes as a collapsible list: timestamp on the left, click-to-edit, delete. */
+function renderDayNotes(
+  container: HTMLElement,
+  notes: DayNote[],
+  handlers?: TrackerHandlers,
+  renderMarkdown?: (el: HTMLElement, text: string) => void,
+): void {
+  if (notes.length === 0) return;
+  const el = container.createEl("details", { cls: "osr-tt-notes" });
+  el.open = true;
+  el.createEl("summary", { cls: "osr-tt-notes-title", text: `Notes (${notes.length})` });
+
+  for (const note of notes) {
+    const row = el.createDiv({ cls: "osr-tt-note" });
+    row.createSpan({ cls: "osr-tt-note-time", text: note.clock });
+    const textEl = row.createDiv({ cls: "osr-tt-note-text" });
+    if (renderMarkdown) renderMarkdown(textEl, note.text);
+    else textEl.setText(note.text);
+    if (!handlers) continue;
+
+    textEl.addClass("is-editable");
+    textEl.addEventListener("click", (evt) => {
+      // Let links/checkboxes in the rendered markdown work; edit only on clicks elsewhere.
+      if ((evt.target as HTMLElement).closest("a, input")) return;
+      handlers.onEditNote(note.index, note.text);
+    });
+    row.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      openMenu(evt, [
+        { title: "Edit", icon: "pencil", onClick: () => handlers.onEditNote(note.index, note.text) },
+        { title: "Delete", icon: "trash", onClick: () => handlers.onDeleteNote(note.index) },
+      ]);
+    });
+    deleteChip(row, () => handlers.onDeleteNote(note.index));
+  }
 }
 
 /**
@@ -260,22 +312,22 @@ function renderPanel(
       const startRename = inlineEdit(nameEl, {
         value: row.name,
         cls: "osr-tt-effect-name-edit",
-        onCommit: (v) => handlers.onRenameMarker(row.kind, row.index, v),
+        onCommit: (v) => handlers.onRenameMarker(row.index, v),
       });
 
       rowEl.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         const items: MenuItemSpec[] = [{ title: "Rename", icon: "pencil", onClick: startRename }];
         if (phase === "active" && row.pausable) {
-          items.push({ title: "Pause", icon: "pause", onClick: () => handlers.onPause(row.kind, row.index) });
+          items.push({ title: "Pause", icon: "pause", onClick: () => handlers.onPause(row.index) });
         }
         if (phase === "paused") {
-          items.push({ title: "Resume", icon: "play", onClick: () => handlers.onResume(row.kind, row.index) });
+          items.push({ title: "Resume", icon: "play", onClick: () => handlers.onResume(row.index) });
         }
         items.push({
           title: "Delete",
           icon: "trash",
-          onClick: () => handlers.onRemoveMarker(row.kind, row.index, row.label),
+          onClick: () => handlers.onRemoveMarker(row.index, row.label),
         });
         openMenu(evt, items);
       });
@@ -299,7 +351,7 @@ function renderPanel(
             // silently expire the marker on an accidental clear-and-blur.
             const turns = Number(v);
             if (v !== "" && Number.isInteger(turns) && turns >= 0) {
-              handlers.onSetRemaining(row.kind, row.index, turns);
+              handlers.onSetRemaining(row.index, turns);
             }
           },
         });
@@ -310,13 +362,10 @@ function renderPanel(
         setIcon(play, "play");
         play.addEventListener("click", (evt) => {
           evt.stopPropagation();
-          handlers.onResume(row.kind, row.index);
+          handlers.onResume(row.index);
         });
       }
-      rowEl.createSpan({ cls: "osr-tt-chip-x", text: "×" }).addEventListener("click", (evt) => {
-        evt.stopPropagation(); // don't also toggle the highlight
-        handlers.onRemoveMarker(row.kind, row.index, row.label);
-      });
+      deleteChip(rowEl, () => handlers.onRemoveMarker(row.index, row.label));
     }
 
     rowEl.addEventListener("click", () => {
@@ -388,6 +437,8 @@ function renderControls(
       custom,
     ]);
   }
+
+  addButton("Note", () => handlers.onAddNote());
 
   addSplitButton("Clear expired", handlers.onClearExpired, [
     { title: "Clear all", onClick: handlers.onClearAll },

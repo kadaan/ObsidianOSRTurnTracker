@@ -9,13 +9,12 @@ describe("seedTrackerState", () => {
       start: "2016-05-21T08:00",
       calendar: "Greyhawk",
       position: 0,
-      lights: [],
-      effects: [],
+      markers: [],
     });
   });
 
   it("defaults to Day-1 / no calendar when frontmatter is absent or unrelated", () => {
-    expect(seedTrackerState(undefined)).toEqual({ position: 0, lights: [], effects: [] });
-    expect(seedTrackerState({ title: "Session 3" })).toEqual({ position: 0, lights: [], effects: [] });
+    expect(seedTrackerState(undefined)).toEqual({ position: 0, markers: [] });
+    expect(seedTrackerState({ title: "Session 3" })).toEqual({ position: 0, markers: [] });
   });
 });

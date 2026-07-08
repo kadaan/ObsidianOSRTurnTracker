@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { Effect, Failure, Light, MAX_POSITION, TrackerState } from "./model";
+import { CUSTOM_TYPE, Failure, Marker, MAX_POSITION, Note, Pause, TrackerState } from "./model";
 
 export type ParseResult = { ok: true; state: TrackerState } | Failure;
 
@@ -27,7 +27,7 @@ export function parseTrackerState(source: string): ParseResult {
     return fail(`"position" is too large (max ${MAX_POSITION} turns).`);
   }
 
-  const state: TrackerState = { position, lights: [], effects: [] };
+  const state: TrackerState = { position, markers: [] };
 
   if (obj.origin !== undefined) {
     if (!isNonNegativeInt(obj.origin)) return fail(`"origin" must be a non-negative whole number.`);
@@ -41,30 +41,45 @@ export function parseTrackerState(source: string): ParseResult {
     if (typeof obj.calendar !== "string") return fail(`"calendar" must be a string.`);
     state.calendar = obj.calendar;
   }
-  if (obj.lights !== undefined) {
-    if (!Array.isArray(obj.lights)) return fail(`"lights" must be a list.`);
-    state.lights = obj.lights.map(toDuration) as unknown as Light[];
+  // One unified `effects` list. The legacy `lights` list (preset-based) and the short-lived
+  // `markers` key are still read (and merged in order) so older blocks keep working.
+  for (const key of ["lights", "effects", "markers"] as const) {
+    const list = obj[key];
+    if (list === undefined) continue;
+    if (!Array.isArray(list)) return fail(`"${key}" must be a list.`);
+    state.markers.push(...list.map(toMarker));
   }
-  if (obj.effects !== undefined) {
-    if (!Array.isArray(obj.effects)) return fail(`"effects" must be a list.`);
-    state.effects = obj.effects.map(toDuration) as unknown as Effect[];
+  if (obj.notes !== undefined) {
+    if (!Array.isArray(obj.notes)) return fail(`"notes" must be a list.`);
+    state.notes = obj.notes.filter(
+      (n): n is Note => !!n && typeof n.at === "number" && typeof n.text === "string",
+    );
   }
 
   return { ok: true, state };
 }
 
 /**
- * Normalize a stored marker to the `duration` form, accepting the legacy `expiresAt`
- * (duration = expiresAt - startsAt). The legacy field is dropped so it isn't re-serialized.
+ * Normalize a stored marker to the current `Marker` shape, accepting three legacy forms:
+ * a light's `preset` field (→ `type`), an effect with only a `label` (→ `type: custom`), and an
+ * `expiresAt` instead of a `duration` (duration = expiresAt - startsAt). Legacy fields are dropped
+ * so they aren't re-serialized.
  */
-function toDuration(raw: unknown): Record<string, unknown> {
-  const { expiresAt, duration, pauses, ...rest } = (raw ?? {}) as Record<string, unknown>;
-  const startsAt = typeof rest.startsAt === "number" ? rest.startsAt : 0;
-  const resolved =
-    typeof duration === "number"
-      ? duration
-      : typeof expiresAt === "number"
-        ? expiresAt - startsAt
+function toMarker(raw: unknown): Marker {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const startsAt = typeof r.startsAt === "number" ? r.startsAt : undefined;
+  const duration =
+    typeof r.duration === "number"
+      ? r.duration
+      : typeof r.expiresAt === "number"
+        ? r.expiresAt - (startsAt ?? 0)
         : 0;
-  return { ...rest, duration: resolved, ...(pauses !== undefined ? { pauses } : {}) };
+  const type =
+    typeof r.type === "string" ? r.type : typeof r.preset === "string" ? r.preset : CUSTOM_TYPE;
+
+  const marker: Marker = { type, duration };
+  if (typeof r.label === "string") marker.label = r.label;
+  if (startsAt !== undefined) marker.startsAt = startsAt;
+  if (Array.isArray(r.pauses)) marker.pauses = r.pauses as Pause[];
+  return marker;
 }

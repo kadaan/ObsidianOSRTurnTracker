@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { makeFantasyDayHeader } from "./calendarium";
 import { TrackerState } from "./model";
 
-const stateWith = (calendar?: string): TrackerState => ({ calendar, position: 0, lights: [], effects: [] });
+const stateWith = (calendar?: string): TrackerState => ({ calendar, position: 0, markers: [] });
 
 function stubCalendarium(value: unknown): void {
   (globalThis as { window?: unknown }).window = { Calendarium: value };

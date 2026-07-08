@@ -10,8 +10,6 @@ export const DEFAULT_ADVANCE_SHORTCUTS = [1, 3, 8];
 export interface LightPreset {
   id: string;
   label: string;
-  /** Short glyph shown on the grid chip, e.g. "T". */
-  marker: string;
   /** Duration in turns. */
   turns: number;
   /** Whether instances of this preset can be paused/resumed (freezing their burn). */
@@ -19,15 +17,15 @@ export interface LightPreset {
 }
 
 export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
-  { id: "torch", label: "Torch", marker: "torch", turns: 6, pausable: true },
-  { id: "lantern", label: "Lantern", marker: "lantern", turns: 24, pausable: true },
+  { id: "torch", label: "Torch", turns: 6, pausable: true },
+  { id: "lantern", label: "Lantern", turns: 24, pausable: true },
 ];
 
 /** Turns rendered past the furthest marker/position, for look-ahead. A setting later. */
 export const LOOKAHEAD_BUFFER = 6;
 
-/** Which marker list a chip came from — its removal target. */
-export type MarkerKind = "light" | "effect";
+/** The `type` of an ad-hoc effect — one with a free-text label and no preset behind it. */
+export const CUSTOM_TYPE = "custom";
 
 /** A turn is 10 minutes; these are enforced constants, never configurable. */
 export const TURNS_PER_HOUR = 6;
@@ -54,12 +52,20 @@ export interface Pause {
   until?: number;
 }
 
-/** A light source, driven by a preset. Turn indices are absolute. */
-export interface Light {
-  preset: string;
-  /** Custom instance name (e.g. "Aragorn's torch"); absent → the preset's label is shown. */
+/**
+ * A timed marker on the tracker: a light source, a spell, a condition — anything with a duration.
+ * `type` is a light-preset id (e.g. "torch") or `CUSTOM_TYPE` for an ad-hoc effect. Turn indices
+ * are absolute.
+ */
+export interface Marker {
+  /** A `LightPreset` id, or `CUSTOM_TYPE` for a free-text effect. Drives the default name and pausability. */
+  type: string;
+  /**
+   * Display name. For a preset marker it's an optional instance override (absent → the preset's
+   * label); for a custom marker it IS the name (the free text the user typed).
+   */
   label?: string;
-  /** Turn the light was lit. Absent on legacy markers → treated as turn 0 (never pending). */
+  /** Turn the marker began. Absent on legacy markers → treated as turn 0 (never pending). */
   startsAt?: number;
   /** Burn duration in active turns; the effective expiry is derived (startsAt + duration + pauses). */
   duration: number;
@@ -67,15 +73,10 @@ export interface Light {
   pauses?: Pause[];
 }
 
-/** An ad-hoc timed effect with a free-text label. Turn indices are absolute. */
-export interface Effect {
-  label: string;
-  /** Turn the effect began. Absent on legacy markers → treated as turn 0 (never pending). */
-  startsAt?: number;
-  /** Duration in active turns; the effective expiry is derived (startsAt + duration + pauses). */
-  duration: number;
-  /** Pause/resume history; absent → never paused. */
-  pauses?: Pause[];
+/** A free-form note anchored to a turn, shown under the day it falls in. */
+export interface Note {
+  at: number;
+  text: string;
 }
 
 /** The full state of a tracker, as stored in a `turn-tracker` code block. */
@@ -91,8 +92,9 @@ export interface TrackerState {
    * from Day 1. Used when cloning a session into a new note so prior elapsed days aren't replayed.
    */
   origin?: number;
-  lights: Light[];
-  effects: Effect[];
+  /** Every timed marker — lights and ad-hoc effects alike — in one list. */
+  markers: Marker[];
+  notes?: Note[];
 }
 
 /** A pure state transition (e.g. End Turn, Advance). */

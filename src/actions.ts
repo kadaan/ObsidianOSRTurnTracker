@@ -1,4 +1,4 @@
-import { TURNS_PER_HOUR, Transform, MarkerKind, Pause, TrackerState, Light, Effect } from "./model";
+import { TURNS_PER_HOUR, Transform, Pause, TrackerState, Marker, CUSTOM_TYPE } from "./model";
 import { resolveMarker } from "./markers";
 
 const advanceTurns =
@@ -20,51 +20,79 @@ export const toggleAt =
   (turn: number): Transform =>
   (state) => ({ ...state, position: turn < state.position ? turn : turn + 1 });
 
-/** Light a source: append a marker burning for `turns` turns from `startsAt` (default: now). */
+/** Light a source: append a preset marker burning for `turns` turns from `startsAt` (default: now). */
 export const lightSource =
-  (preset: string, turns: number, startsAt?: number): Transform =>
+  (type: string, turns: number, startsAt?: number): Transform =>
   (state) => ({
     ...state,
-    lights: [...state.lights, { preset, startsAt: startsAt ?? state.position, duration: turns }],
+    markers: [...state.markers, { type, startsAt: startsAt ?? state.position, duration: turns }],
   });
 
-/** Add an ad-hoc effect: append a labelled marker lasting `turns` turns from `startsAt` (default: now). */
+/** Add an ad-hoc effect: append a labelled custom marker lasting `turns` turns from `startsAt` (default: now). */
 export const addEffect =
   (label: string, turns: number, startsAt?: number): Transform =>
   (state) => ({
     ...state,
-    effects: [...state.effects, { label, startsAt: startsAt ?? state.position, duration: turns }],
+    markers: [
+      ...state.markers,
+      { type: CUSTOM_TYPE, label, startsAt: startsAt ?? state.position, duration: turns },
+    ],
   });
 
 /** Drop every marker that has already expired (its derived burn is spent). */
 export const clearExpired: Transform = (state) => ({
   ...state,
-  lights: state.lights.filter((l) => resolveMarker(l, state.position).phase !== "expired"),
-  effects: state.effects.filter((e) => resolveMarker(e, state.position).phase !== "expired"),
+  markers: state.markers.filter((m) => resolveMarker(m, state.position).phase !== "expired"),
 });
 
 /** Remove all markers, active or expired. */
-export const clearAll: Transform = (state) => ({ ...state, lights: [], effects: [] });
+export const clearAll: Transform = (state) => ({ ...state, markers: [] });
+
+/** Map the item at `index` through `fn`, returning a new list — or `undefined` if out of range. */
+const mapAt = <T>(list: T[], index: number, fn: (item: T) => T): T[] | undefined =>
+  index < 0 || index >= list.length ? undefined : list.map((x, i) => (i === index ? fn(x) : x));
+
+/** Drop the item at `index`, returning a new list — or `undefined` if out of range. */
+const dropAt = <T>(list: T[], index: number): T[] | undefined =>
+  index < 0 || index >= list.length ? undefined : list.filter((_, i) => i !== index);
+
+/** Add a free-form note anchored to `at` (default: the current position). */
+export const addNote =
+  (text: string, at?: number): Transform =>
+  (state) => ({
+    ...state,
+    notes: [...(state.notes ?? []), { at: at ?? state.position, text }],
+  });
+
+/** Replace the text of the note at `index`. A no-op for an out-of-range index. */
+export const editNote =
+  (index: number, text: string): Transform =>
+  (state) => {
+    const notes = mapAt(state.notes ?? [], index, (n) => ({ ...n, text }));
+    return notes ? { ...state, notes } : state;
+  };
+
+/** Remove the note at `index`. A no-op for an out-of-range index. */
+export const removeNote =
+  (index: number): Transform =>
+  (state) => {
+    const notes = dropAt(state.notes ?? [], index);
+    return notes ? { ...state, notes } : state;
+  };
 
 const hasOpenPause = (pauses?: Pause[]) => (pauses ?? []).some((p) => p.until === undefined);
 
 /**
- * Replace the marker at `index` within its `kind`'s list via `update`, rebuilding state with the
- * correct list. Out-of-range is a no-op. Targeting by position addresses each instance
- * unambiguously, even among identical markers.
+ * Replace the marker at `index` via `update`, rebuilding state. Out-of-range is a no-op. Targeting
+ * by position addresses each instance unambiguously, even among identical markers.
  */
 const updateMarkerAt = (
   state: TrackerState,
-  kind: MarkerKind,
   index: number,
-  update: (m: Light | Effect) => Light | Effect,
+  update: (m: Marker) => Marker,
 ): TrackerState => {
-  const list: (Light | Effect)[] = kind === "light" ? state.lights : state.effects;
-  if (index < 0 || index >= list.length) return state;
-  const next = list.map((m, i) => (i === index ? update(m) : m));
-  return kind === "light"
-    ? { ...state, lights: next as Light[] }
-    : { ...state, effects: next as Effect[] };
+  const markers = mapAt(state.markers, index, update);
+  return markers ? { ...state, markers } : state;
 };
 
 /**
@@ -73,9 +101,9 @@ const updateMarkerAt = (
  * duration; it also lets you dial in durations after creating effects for a session.
  */
 export const setRemaining =
-  (kind: MarkerKind, index: number, turns: number): Transform =>
+  (index: number, turns: number): Transform =>
   (state) =>
-    updateMarkerAt(state, kind, index, (m) => {
+    updateMarkerAt(state, index, (m) => {
       const consumed = m.duration - resolveMarker(m, state.position).remaining;
       return { ...m, duration: consumed + turns };
     });
@@ -85,11 +113,10 @@ export const setRemaining =
  * index is out of range or the marker is already paused.
  */
 export const pauseMarker =
-  (kind: MarkerKind, index: number): Transform =>
+  (index: number): Transform =>
   (state) => {
-    const marker = (kind === "light" ? state.lights : state.effects)[index];
-    if (hasOpenPause(marker?.pauses)) return state;
-    return updateMarkerAt(state, kind, index, (m) => ({
+    if (hasOpenPause(state.markers[index]?.pauses)) return state;
+    return updateMarkerAt(state, index, (m) => ({
       ...m,
       pauses: [...(m.pauses ?? []), { at: state.position }],
     }));
@@ -100,41 +127,36 @@ export const pauseMarker =
  * burn continues from here. A no-op if the index is out of range or the marker is not paused.
  */
 export const resumeMarker =
-  (kind: MarkerKind, index: number): Transform =>
+  (index: number): Transform =>
   (state) => {
-    const marker = (kind === "light" ? state.lights : state.effects)[index];
-    if (!hasOpenPause(marker?.pauses)) return state;
-    return updateMarkerAt(state, kind, index, (m) => ({
+    if (!hasOpenPause(state.markers[index]?.pauses)) return state;
+    return updateMarkerAt(state, index, (m) => ({
       ...m,
       pauses: (m.pauses ?? []).map((p) => (p.until === undefined ? { ...p, until: state.position } : p)),
     }));
   };
 
-/** Remove the marker at `index` within its `kind`'s list. Out-of-range is a no-op. */
+/** Remove the marker at `index`. Out-of-range is a no-op. */
 export const removeMarker =
-  (kind: MarkerKind, index: number): Transform =>
+  (index: number): Transform =>
   (state) => {
-    if (kind === "light") {
-      if (index < 0 || index >= state.lights.length) return state;
-      return { ...state, lights: state.lights.filter((_, i) => i !== index) };
-    }
-    if (index < 0 || index >= state.effects.length) return state;
-    return { ...state, effects: state.effects.filter((_, i) => i !== index) };
+    const markers = dropAt(state.markers, index);
+    return markers ? { ...state, markers } : state;
   };
 
 /**
- * Rename the marker at `index`. A light gets a custom instance `label` (a blank name clears it,
- * reverting to the preset default); an effect's own label is replaced (blank is a no-op, since
- * effects have no default to fall back to).
+ * Rename the marker at `index` via a custom instance `label`. For a preset marker a blank name
+ * clears the override, reverting to the preset's default; for a custom marker the label IS the
+ * name, so a blank is a no-op (there's no default to fall back to).
  */
 export const renameMarker =
-  (kind: MarkerKind, index: number, name: string): Transform =>
+  (index: number, name: string): Transform =>
   (state) => {
     const trimmed = name.trim();
-    if (kind === "effect" && !trimmed) return state;
-    return updateMarkerAt(state, kind, index, (m) => {
-      if (kind === "effect") return { ...m, label: trimmed };
-      const { label: _drop, ...rest } = m as Light;
-      return trimmed ? { ...rest, label: trimmed } : rest;
+    if (!trimmed && state.markers[index]?.type === CUSTOM_TYPE) return state;
+    return updateMarkerAt(state, index, (m) => {
+      if (trimmed) return { ...m, label: trimmed };
+      const { label: _drop, ...rest } = m;
+      return rest;
     });
   };

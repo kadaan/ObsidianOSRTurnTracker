@@ -37,6 +37,14 @@ export interface HourRow {
   boxes: Box[];
 }
 
+/** A note as shown in a day's note list: its source index, turn, clock time, and text. */
+export interface DayNote {
+  index: number;
+  at: number;
+  clock: string;
+  text: string;
+}
+
 export interface DayBlock {
   header: string;
   hours: HourRow[];
@@ -44,6 +52,8 @@ export interface DayBlock {
   currentTime?: string;
   /** True when every turn of the day has elapsed (fully in the past). */
   complete: boolean;
+  /** Notes anchored to this day, sorted by turn. */
+  notes: DayNote[];
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -58,7 +68,7 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
   // Resolve every marker's burn state (honouring pauses); pending markers (startsAt in the
   // future, only reachable by rewinding) are excluded. Each active burn segment paints a span;
   // a paused marker's span stops at the pause and contributes no ending marker.
-  const resolved = [...state.lights, ...state.effects]
+  const resolved = state.markers
     .map((m) => resolveMarker(m, state.position))
     .filter((r) => r.phase !== "upcoming");
   const segments = resolved.flatMap((r) => r.segments);
@@ -80,6 +90,9 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
 
   // Skip whole days before the origin's day (used when cloning a session into a fresh note).
   const originDay = Math.min(dayOf(state.origin ?? 0), dayCount - 1);
+
+  // Keep each note's source index so the panel can target it for edit/delete.
+  const indexedNotes = (state.notes ?? []).map((n, index) => ({ index, at: n.at, text: n.text }));
 
   for (let day = originDay; day < dayCount; day++) {
     const hours: HourRow[] = [];
@@ -105,7 +118,18 @@ export function computeGrid(state: TrackerState, options: GridOptions = {}): Day
     const inProgress = turnOfDay >= 0 && turnOfDay < TURNS_PER_DAY;
     const currentTime = inProgress ? formatClock(turnOfDay) : undefined;
 
-    days.push({ header: dayHeader(day), hours, currentTime, complete: turnOfDay >= TURNS_PER_DAY });
+    const notes: DayNote[] = indexedNotes
+      .filter((n) => n.at >= dayStart && n.at < dayStart + TURNS_PER_DAY)
+      .sort((a, b) => a.at - b.at)
+      .map((n) => ({ index: n.index, at: n.at, clock: formatClock(n.at - dayStart), text: n.text }));
+
+    days.push({
+      header: dayHeader(day),
+      hours,
+      currentTime,
+      complete: turnOfDay >= TURNS_PER_DAY,
+      notes,
+    });
   }
 
   return days;

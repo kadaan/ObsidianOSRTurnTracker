@@ -87,6 +87,76 @@
   opacity: 0.55;
 }
 
+/* ── Per-day notes ── */
+.osr-tt-notes {
+  margin-top: 0.5em;
+}
+
+.osr-tt-notes-title {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.osr-tt-note {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 2px 4px;
+}
+
+.osr-tt-note-time {
+  flex: 0 0 auto;
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+
+.osr-tt-note-text {
+  flex: 1 1 auto;
+}
+
+/* Rendered markdown wraps its content in block elements; keep them compact in the row. */
+.osr-tt-note-text > :first-child {
+  margin-top: 0;
+}
+
+.osr-tt-note-text > :last-child {
+  margin-bottom: 0;
+}
+
+.osr-tt-note-text.is-editable {
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  padding: 0 2px;
+}
+
+.osr-tt-note-text.is-editable:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Full-width note textarea in the add/edit modal. */
+textarea.osr-tt-note-input {
+  width: 100%;
+  resize: vertical;
+  margin-bottom: 0.75em;
+}
+
+/* Add-effect modal: fixed-width label column + equal-width, roomier inputs on both rows. */
+.osr-tt-effect-modal .setting-item-info {
+  flex: 0 0 10em;
+}
+
+.osr-tt-effect-modal .setting-item-control {
+  flex: 1 1 auto;
+}
+
+.osr-tt-effect-modal .setting-item-control input[type="text"],
+.osr-tt-effect-modal .setting-item-control input[type="number"] {
+  width: 100%;
+  height: 2.2em;
+  font-size: var(--font-ui-medium);
+}
+
 /* Box highlighted by a selected effect row. */
 .osr-tt-box.is-highlit {
   outline: 2px solid var(--text-accent);

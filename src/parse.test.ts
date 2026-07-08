@@ -2,14 +2,13 @@ import { describe, it, expect } from "vitest";
 import { parseTrackerState } from "./parse";
 
 describe("parseTrackerState", () => {
-  it("parses a valid block into state, defaulting marker lists", () => {
+  it("parses a valid block into state, defaulting the marker list", () => {
     const result = parseTrackerState("position: 14");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.position).toBe(14);
-    expect(result.state.lights).toEqual([]);
-    expect(result.state.effects).toEqual([]);
+    expect(result.state.markers).toEqual([]);
   });
 
   it("returns an error (does not throw) on malformed YAML", () => {

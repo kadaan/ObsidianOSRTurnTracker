@@ -16,7 +16,7 @@ describe("formatRealDate", () => {
 });
 
 describe("makeDayHeader", () => {
-  const stateWith = (start?: string): TrackerState => ({ start, position: 0, lights: [], effects: [] });
+  const stateWith = (start?: string): TrackerState => ({ start, position: 0, markers: [] });
 
   it("labels days 'Day N' when there is no start", () => {
     const header = makeDayHeader(stateWith(undefined));

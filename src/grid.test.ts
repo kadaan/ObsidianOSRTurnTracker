@@ -3,7 +3,7 @@ import { computeGrid } from "./grid";
 import { TrackerState } from "./model";
 
 function stateAt(position: number): TrackerState {
-  return { position, lights: [], effects: [] };
+  return { position, markers: [] };
 }
 
 describe("computeGrid", () => {
@@ -69,8 +69,7 @@ describe("computeGrid", () => {
     // a lantern lit at turn 0, expiring at 200 (day 2), pulls day 2 into view
     const state: TrackerState = {
       position: 0,
-      lights: [{ preset: "lantern", startsAt: 0, duration: 200 }],
-      effects: [],
+      markers: [{ type: "lantern", startsAt: 0, duration: 200 }],
     };
 
     expect(computeGrid(state)).toHaveLength(2);
@@ -80,8 +79,7 @@ describe("computeGrid", () => {
     // position 0 but the lantern starts at turn 200 — not lit yet, so it shouldn't extend the grid
     const state: TrackerState = {
       position: 0,
-      lights: [{ preset: "lantern", startsAt: 200, duration: 24 }],
-      effects: [],
+      markers: [{ type: "lantern", startsAt: 200, duration: 24 }],
     };
 
     expect(computeGrid(state)).toHaveLength(1);
@@ -90,11 +88,10 @@ describe("computeGrid", () => {
   it("counts markers starting and ending on each box (last active turn = expiresAt - 1)", () => {
     const state: TrackerState = {
       position: 10,
-      lights: [
-        { preset: "torch", startsAt: 4, duration: 6 },
-        { preset: "torch", startsAt: 4, duration: 6 },
+      markers: [
+        { type: "torch", startsAt: 4, duration: 6 },
+        { type: "torch", startsAt: 4, duration: 6 },
       ],
-      effects: [],
     };
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
@@ -107,8 +104,7 @@ describe("computeGrid", () => {
   it("flags boxes within a live marker's span", () => {
     const state: TrackerState = {
       position: 10,
-      lights: [{ preset: "torch", startsAt: 4, duration: 4 }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 4, duration: 4 }],
     };
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
@@ -122,8 +118,7 @@ describe("computeGrid", () => {
   it("truncates a paused light's span at the pause and drops its ending marker", () => {
     const state: TrackerState = {
       position: 5,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3 }] }],
     };
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
@@ -136,8 +131,7 @@ describe("computeGrid", () => {
   it("shows a resumed light's span with a gap during the pause", () => {
     const state: TrackerState = {
       position: 12,
-      lights: [{ preset: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3, until: 10 }] }],
-      effects: [],
+      markers: [{ type: "torch", startsAt: 0, duration: 6, pauses: [{ at: 3, until: 10 }] }],
     };
 
     const boxes = computeGrid(state).flatMap((d) => d.hours.flatMap((h) => h.boxes));
@@ -152,7 +146,7 @@ describe("computeGrid", () => {
 
   it("hides days before the origin, rendering from the day that contains it", () => {
     // position 600 is day 5 (turns 576-719); origin at that day's start hides days 1-4.
-    const state: TrackerState = { position: 600, origin: 576, lights: [], effects: [] };
+    const state: TrackerState = { position: 600, origin: 576, markers: [] };
 
     const days = computeGrid(state);
 
@@ -162,20 +156,40 @@ describe("computeGrid", () => {
   });
 
   it("renders from Day 1 when origin is absent (backward compatible)", () => {
-    const days = computeGrid({ position: 600, lights: [], effects: [] });
+    const days = computeGrid({ position: 600, markers: [] });
 
     expect(days[0].header).toBe("Day 1");
   });
 
+  it("groups notes under the day they fall in, sorted by turn, with clock + source index", () => {
+    const state: TrackerState = {
+      position: 150,
+      markers: [],
+      notes: [
+        { at: 150, text: "day 2 later" }, // day 2 (index 1), 01:00
+        { at: 6, text: "day 1" }, // day 1 (index 0), 01:00
+        { at: 145, text: "day 2 earlier" }, // day 2, 00:10
+      ],
+    };
+
+    const days = computeGrid(state);
+
+    expect(days[0].notes).toEqual([{ index: 1, at: 6, clock: "01:00", text: "day 1" }]);
+    expect(days[1].notes).toEqual([
+      { index: 2, at: 145, clock: "00:10", text: "day 2 earlier" },
+      { index: 0, at: 150, clock: "01:00", text: "day 2 later" },
+    ]);
+  });
+
   it("honors a configured look-ahead buffer for the render horizon", () => {
-    const state: TrackerState = { position: 0, lights: [], effects: [] };
+    const state: TrackerState = { position: 0, markers: [] };
 
     expect(computeGrid(state)).toHaveLength(1); // default buffer stays within day 1
     expect(computeGrid(state, { lookaheadBuffer: 200 })).toHaveLength(2); // buffer reaches day 2
   });
 
   it("uses real-date headers when the state has a datetime start", () => {
-    const state: TrackerState = { start: "2016-05-21T08:00", position: 0, lights: [], effects: [] };
+    const state: TrackerState = { start: "2016-05-21T08:00", position: 0, markers: [] };
 
     const header = computeGrid(state)[0].header;
     expect(header).not.toBe("Day 1");
@@ -183,7 +197,7 @@ describe("computeGrid", () => {
   });
 
   it("honors a dayHeader override (e.g. a fantasy calendar)", () => {
-    const state: TrackerState = { position: 0, lights: [], effects: [] };
+    const state: TrackerState = { position: 0, markers: [] };
 
     expect(computeGrid(state, { dayHeader: (i) => `Fantasy ${i}` })[0].header).toBe("Fantasy 0");
   });

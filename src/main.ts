@@ -3,6 +3,8 @@ import {
   App,
   Editor,
   MarkdownPostProcessorContext,
+  MarkdownRenderChild,
+  MarkdownRenderer,
   Modal,
   Notice,
   Plugin,
@@ -25,6 +27,9 @@ import {
   setRemaining,
   pauseMarker,
   resumeMarker,
+  addNote,
+  editNote,
+  removeNote,
   toggleAt,
 } from "./actions";
 import { applyTrackerAction } from "./apply";
@@ -71,6 +76,10 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         renderError(el, result.error);
         return;
       }
+      // Own any markdown render-children on a child scoped to this block, so they unload when the
+      // block re-renders. Passing the plugin as owner would leak them until the plugin unloads.
+      const renderChild = new MarkdownRenderChild(el);
+      ctx.addChild(renderChild);
       renderTracker(el, result.state, this.settings, {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
@@ -88,18 +97,29 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           ).open(),
         onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
         onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
-        onRemoveMarker: (kind, index, label) =>
+        onRemoveMarker: (index, label) =>
           new ConfirmModal(this.app, `Remove "${label}"?`, () =>
-            void this.mutateFromWidget(el, ctx, removeMarker(kind, index)),
+            void this.mutateFromWidget(el, ctx, removeMarker(index)),
           ).open(),
-        onRenameMarker: (kind, index, name) =>
-          void this.mutateFromWidget(el, ctx, renameMarker(kind, index, name)),
-        onPause: (kind, index) => void this.mutateFromWidget(el, ctx, pauseMarker(kind, index)),
-        onResume: (kind, index) => void this.mutateFromWidget(el, ctx, resumeMarker(kind, index)),
-        onSetRemaining: (kind, index, turns) =>
-          void this.mutateFromWidget(el, ctx, setRemaining(kind, index, turns)),
+        onRenameMarker: (index, name) =>
+          void this.mutateFromWidget(el, ctx, renameMarker(index, name)),
+        onPause: (index) => void this.mutateFromWidget(el, ctx, pauseMarker(index)),
+        onResume: (index) => void this.mutateFromWidget(el, ctx, resumeMarker(index)),
+        onSetRemaining: (index, turns) =>
+          void this.mutateFromWidget(el, ctx, setRemaining(index, turns)),
         onCopyState: () => void this.copyState(result.state),
-      }, makeFantasyDayHeader(result.state, () => this.warnCalendar()));
+        onAddNote: (at) =>
+          new NoteModal(this.app, "", (text) => void this.mutateFromWidget(el, ctx, addNote(text, at))).open(),
+        onEditNote: (index, text) =>
+          new NoteModal(this.app, text, (next) =>
+            void this.mutateFromWidget(el, ctx, editNote(index, next)),
+          ).open(),
+        onDeleteNote: (index) =>
+          new ConfirmModal(this.app, "Delete this note?", () =>
+            void this.mutateFromWidget(el, ctx, removeNote(index)),
+          ).open(),
+      }, makeFantasyDayHeader(result.state, () => this.warnCalendar()),
+      (host, text) => void MarkdownRenderer.render(this.app, text, host, ctx.sourcePath, renderChild));
     });
 
     this.addCommand({
@@ -223,8 +243,11 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     // Stamp the render origin at the current day's start so a pasted clone doesn't replay prior days,
     // and drop spent markers so the clone starts clean.
     const origin = dayOf(state.position) * TURNS_PER_DAY;
+    const pruned = clearExpired(state);
+    // Keep only notes at or after the current turn (past notes belong to the finished session).
+    const notes = pruned.notes?.filter((n) => n.at >= state.position);
     try {
-      await navigator.clipboard.writeText(fenceTrackerBlock({ ...clearExpired(state), origin }));
+      await navigator.clipboard.writeText(fenceTrackerBlock({ ...pruned, origin, notes }));
       new Notice("Tracker state copied to clipboard.");
     } catch {
       new Notice("OSR Turn Tracker: couldn't access the clipboard.");
@@ -257,6 +280,46 @@ class ConfirmModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+/** Prompts for a note's free-form text (empty = new note, otherwise editing), then invokes `onSubmit`. */
+class NoteModal extends Modal {
+  private text: string;
+
+  constructor(
+    app: App,
+    initial: string,
+    private readonly onSubmit: (text: string) => void,
+  ) {
+    super(app);
+    this.text = initial;
+  }
+
+  onOpen(): void {
+    this.contentEl.createEl("h3", { text: this.text ? "Edit note" : "Add note" });
+    const input = this.contentEl.createEl("textarea", { cls: "osr-tt-note-input" });
+    input.rows = 4;
+    input.value = this.text;
+    input.addEventListener("input", () => (this.text = input.value));
+    new Setting(this.contentEl).addButton((b) =>
+      b.setButtonText("Save").setCta().onClick(() => this.submit()),
+    );
+    input.focus();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private submit(): void {
+    const text = this.text.trim();
+    if (!text) {
+      new Notice("Enter some text.");
+      return;
+    }
+    this.onSubmit(text);
+    this.close();
   }
 }
 
@@ -329,6 +392,7 @@ class EffectModal extends Modal {
   }
 
   onOpen(): void {
+    this.contentEl.addClass("osr-tt-effect-modal");
     this.contentEl.createEl("h3", { text: "Add effect" });
 
     let durationField: TextComponent;
@@ -429,13 +493,6 @@ class OsrSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
         )
-        .addText((t) => {
-          t.inputEl.size = 3;
-          t.setPlaceholder("Glyph").setValue(preset.marker).onChange(async (v) => {
-            preset.marker = v;
-            await this.plugin.saveSettings();
-          });
-        })
         .addText((t) => this.numberInput(t, 1, () => preset.turns, (n) => (preset.turns = n)))
         .addToggle((t) =>
           t
@@ -460,7 +517,6 @@ class OsrSettingsTab extends PluginSettingTab {
         s.presets.push({
           id: `preset-${Math.random().toString(36).slice(2, 8)}`,
           label: "New light",
-          marker: "?",
           turns: 6,
           pausable: true,
         });

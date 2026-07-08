@@ -5,7 +5,7 @@ import { TrackerState } from "./model";
  * from the note's frontmatter (`startTime` / `fc-calendar`) when present.
  */
 export function seedTrackerState(frontmatter: Record<string, unknown> | undefined): TrackerState {
-  const state: TrackerState = { position: 0, lights: [], effects: [] };
+  const state: TrackerState = { position: 0, markers: [] };
 
   const start = frontmatter?.startTime;
   if (typeof start === "string") state.start = start;

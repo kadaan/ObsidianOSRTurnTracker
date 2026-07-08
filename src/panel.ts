@@ -1,9 +1,8 @@
-import { DEFAULT_LIGHT_PRESETS, LightPreset, MarkerKind, TrackerState } from "./model";
+import { DEFAULT_LIGHT_PRESETS, LightPreset, TrackerState } from "./model";
 import { MarkerPhase, resolveMarker } from "./markers";
 
 export interface EffectRow {
-  kind: MarkerKind;
-  /** Index of this marker within its `kind`'s list — its unambiguous rename/remove target. */
+  /** Index of this marker within the state's `markers` list — its unambiguous rename/remove target. */
   index: number;
   /** Editable base name (light's custom label or preset default; effect's own label). */
   name: string;
@@ -14,7 +13,7 @@ export interface EffectRow {
   expiresAt: number;
   /** Active burn intervals `[from, to)` — pause gaps excluded. */
   segments: Array<[number, number]>;
-  /** Whether this marker can be paused/resumed (driven by the preset for lights). */
+  /** Whether this marker can be paused/resumed (driven by its preset; custom markers cannot). */
   pausable: boolean;
   /** 0..1 through the marker's burn. */
   progress: number;
@@ -25,34 +24,24 @@ export interface EffectRow {
 export type EffectPanel = Record<MarkerPhase, EffectRow[]>;
 
 /**
- * Build the effect panel from tracker state: unify lights + effects, resolve each marker's burn
- * state (honouring pauses) relative to `position`, partition into active / paused / upcoming /
- * expired, sort each by start then name, and number same-named rows within a list.
+ * Build the effect panel from tracker state: resolve each marker's burn state (honouring pauses)
+ * relative to `position`, partition into active / paused / upcoming / expired, sort each by start
+ * then name, and number same-named rows within a list.
  */
 export function computeEffectPanel(
   state: TrackerState,
   presets: LightPreset[] = DEFAULT_LIGHT_PRESETS,
 ): EffectPanel {
-  const markers = [
-    ...state.lights.map((src, index) => {
-      const preset = presets.find((p) => p.id === src.preset);
-      return {
-        kind: "light" as const,
-        index,
-        // A custom instance name wins; otherwise the preset's full name (glyphs are gone).
-        base: src.label ?? preset?.label ?? src.preset,
-        pausable: !!preset?.pausable,
-        src,
-      };
-    }),
-    ...state.effects.map((src, index) => ({
-      kind: "effect" as const,
+  const markers = state.markers.map((src, index) => {
+    const preset = presets.find((p) => p.id === src.type);
+    return {
       index,
-      base: src.label,
-      pausable: false,
+      // A custom instance name wins; otherwise the preset's full name, then the raw type as a fallback.
+      base: src.label ?? preset?.label ?? src.type,
+      pausable: !!preset?.pausable,
       src,
-    })),
-  ];
+    };
+  });
 
   const lists: EffectPanel = { active: [], paused: [], upcoming: [], expired: [] };
 
@@ -60,7 +49,6 @@ export function computeEffectPanel(
     const r = resolveMarker(m.src, state.position);
     const duration = m.src.duration;
     lists[r.phase].push({
-      kind: m.kind,
       index: m.index,
       name: m.base,
       label: m.base,

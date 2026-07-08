@@ -1,5 +1,5 @@
 import { stringify as stringifyYaml } from "yaml";
-import { TrackerState, TRACKER_LANG } from "./model";
+import { Marker, TrackerState, TRACKER_LANG } from "./model";
 
 /**
  * Serialize tracker state to canonical YAML for a `turn-tracker` code block body.
@@ -12,9 +12,11 @@ export function serializeTrackerState(state: TrackerState): string {
   if (state.calendar !== undefined) obj.calendar = state.calendar;
   obj.position = state.position;
   if (state.origin) obj.origin = state.origin; // omit the 0/absent default
-  // Emit markers ordered by start, then name, so the stored YAML matches the panel order.
-  if (state.lights.length > 0) obj.lights = sortMarkers(state.lights, (l) => l.preset);
-  if (state.effects.length > 0) obj.effects = sortMarkers(state.effects, (e) => e.label);
+  // Emit effects ordered by start, then name, so the stored YAML matches the panel order.
+  if (state.markers.length > 0) obj.effects = sortMarkers(state.markers).map(orderMarker);
+  if (state.notes && state.notes.length > 0) {
+    obj.notes = [...state.notes].sort((a, b) => a.at - b.at);
+  }
 
   return stringifyYaml(obj).trimEnd();
 }
@@ -24,7 +26,20 @@ export function fenceTrackerBlock(state: TrackerState): string {
   return `\`\`\`${TRACKER_LANG}\n${serializeTrackerState(state)}\n\`\`\``;
 }
 
-const sortMarkers = <T extends { startsAt?: number }>(markers: T[], name: (m: T) => string): T[] =>
+/** A marker's display name for sorting — its custom label, else its type. */
+const markerName = (m: Marker): string => m.label ?? m.type;
+
+const sortMarkers = (markers: Marker[]): Marker[] =>
   [...markers].sort(
-    (a, b) => (a.startsAt ?? 0) - (b.startsAt ?? 0) || name(a).localeCompare(name(b)),
+    (a, b) => (a.startsAt ?? 0) - (b.startsAt ?? 0) || markerName(a).localeCompare(markerName(b)),
   );
+
+/** Emit a marker with a stable field order, omitting absent optionals, for tidy YAML. */
+const orderMarker = (m: Marker): Record<string, unknown> => {
+  const o: Record<string, unknown> = { type: m.type };
+  if (m.label !== undefined) o.label = m.label;
+  if (m.startsAt !== undefined) o.startsAt = m.startsAt;
+  o.duration = m.duration;
+  if (m.pauses !== undefined) o.pauses = m.pauses;
+  return o;
+};
