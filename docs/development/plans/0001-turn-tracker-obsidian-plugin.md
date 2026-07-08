@@ -266,9 +266,9 @@ usage, screenshots) with a link to the `v1.3-legacy` tag for the old Templater a
 
 ### Acceptance criteria
 
-- [ ] Hygiene audit passes: unloading the plugin leaves no dangling handlers/intervals;
-      no `innerHTML`/`eval`/network calls anywhere.
-- [ ] `manifest.json` + `versions.json` are valid; the release Action produces a
-      release with the built artifacts attached.
-- [ ] `README.md` documents the plugin and links `v1.3-legacy`; the repo is ready to
-      submit as a PR to `obsidianmd/obsidian-releases`.
+- [x] Hygiene audit passes: unloading the plugin leaves no dangling handlers/intervals;
+      no `innerHTML`/`eval`/network calls anywhere. *(`hygiene.test.ts` scans all 16 source files for forbidden DOM/eval/network APIs; audit confirms no timers or global/window listeners and all registrations go through `this.registerMarkdownCodeBlockProcessor`/`this.addCommand` — auto-detached on unload, so no `onunload` is needed.)*
+- [x] `manifest.json` + `versions.json` are valid; the release Action produces a
+      release with the built artifacts attached. *(`release-metadata.test.ts` validates manifest/versions/package consistency; `.github/workflows/release.yml` builds and attaches `main.js`/`manifest.json`/`styles.css` on a version-matched tag — YAML validated locally, an actual release run needs a real tag push.)*
+- [x] `README.md` documents the plugin and links `v1.3-legacy`; the repo is ready to
+      submit as a PR to `obsidianmd/obsidian-releases`. *(README rewritten for the plugin with install/usage and a `v1.3-legacy` link; submission itself is a manual GitHub step.)*

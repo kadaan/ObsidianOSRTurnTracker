@@ -1,5 +1,3 @@
-const crypto = require("crypto");
-
 /** The outcome of evaluating a duration expression. */
 export interface DurationRoll {
   /** Final turn count (dice summed plus the modifier). May be ≤ 0 for a big negative modifier. */
@@ -45,8 +43,18 @@ function canonical(p: ParsedDuration): string {
   return `${p.count}d${p.sides}${mod}`;
 }
 
-/** Default randomness: a crypto-backed uniform value in [0, 1). Tests inject their own rng. */
-const cryptoRng = (): number => crypto.randomInt(0x1_0000_0000) / 0x1_0000_0000;
+/**
+ * Default randomness: a crypto-backed uniform value in [0, 1). Requires `crypto` lazily and guards
+ * it, so a platform without Node's `require` (e.g. Obsidian mobile) falls back to `Math.random`
+ * instead of throwing at module load. Tests inject their own rng.
+ */
+const cryptoRng = (): number => {
+  try {
+    return require("crypto").randomInt(0x1_0000_0000) / 0x1_0000_0000;
+  } catch {
+    return Math.random();
+  }
+};
 
 /**
  * Parse and roll a duration expression (see `parseDuration`). Dice are summed with the modifier; a

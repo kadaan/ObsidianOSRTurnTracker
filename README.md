@@ -1,58 +1,98 @@
-A simple OSR dungeon turn tracker for Obsidian.md, building on the `!checks` callout in ITS theme. 
+# OSR Turn Tracker
 
-![demo-gif](https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2NjMjdvd2s2MGdtaXNtb2Z5d2hsOWh1MXJiOHJvZ2gxbm5odWVobCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/eCZDr7sTh5hf52FB6K/giphy.gif)
+An Obsidian plugin for running old-school dungeon exploration: track the 10-minute
+exploration turn, light sources, and timed effects right inside a note. Everything lives
+in a single ` ```turn-tracker ` code block whose YAML is the source of truth — no external
+scripts, themes, or JavaScript to enable.
+
+> **Upgrading from the Templater version?** The original Templater / Meta-Bind build is
+> preserved at the [`v1.3-legacy`](../../releases/tag/v1.3-legacy) tag. This plugin
+> replaces it — you no longer need ITS Theme, Templater, Meta-Bind, or JS Engine.
 
 ## Features
 
-- Automatic start date/time when the tracker is built inside a session note;
-- Adding and clearing torches and lanterns;
-- Adding and clearing effects with custom labels and durations;
-- Buttons to advance the tracker by a turn or a number of hours;
-- Light and custom effects "expire" (turn from bold to italics) when the tracker reaches them;
-- Effects of the same type which expire on the same turn are "stacked". E.g. lighting a second torch on the same turn will update the expiry label from `T` to `T2`.
-- Ability to add days to the tracker if needed.
-- Displays custom weekday and month names when used with Calendarium plugin.
+- A `turn-tracker` code block that renders an interactive timeline: one box per turn,
+  grouped into hour rows (6 turns) and day blocks (144 turns).
+- **End Turn** and **advance by hours** (default +1h / +3h / +8h) as buttons and as
+  hotkey-able commands.
+- **Click any box** to move the elapsed/remaining boundary; jumping backward is allowed and
+  reversibly recomputes everything.
+- **Lights and effects** in one list, shipping with Torch (6 turns) and Lantern (24)
+  presets. Add ad-hoc effects with a label and a duration — a plain number *or dice*, e.g.
+  `2d6+1`, rolled when you add it.
+- **Pause / resume** pausable markers (the lights) — their burn freezes and the timeline
+  reflects the gap.
+- **Rename** any marker instance (e.g. "Aragorn's torch"), set its remaining turns inline,
+  and remove it. An Active / Paused / Upcoming / Expired panel shows each marker's progress.
+- **Notes** anchored to a turn, shown under the day they fall in, with full Markdown.
+- **Copy tracker state** from a day's right-click menu to paste a clean continuation into a
+  new session note (spent markers and past notes are dropped).
+- **Day headers** in three modes: `Day N`, real dates (from a `start` datetime), or a
+  fantasy calendar via the optional [Calendarium](https://github.com/javalent/calendarium)
+  plugin. Days are collapsible; the current day stays open.
+- Configurable presets, advance shortcuts, and look-ahead buffer in the settings tab.
 
-## Disclaimer
+## Installation
 
-This tool has been tested to a reasonable degree, but it isn't bulletproof. Running custom JavaScript in your vault can be unintentionally destructive. Don't do it unless you understand the risks. **Always backup your vault first.**
+### Community plugins
 
-## Dependencies
+Once accepted into the Obsidian community store: **Settings → Community plugins → Browse**,
+search for "OSR Turn Tracker", install, and enable.
 
-The turn tracker leverages popular community plugins and themes for its functionality. These must be installed and configured for the turn tracker to work.
+### Manual
 
-- **ITS Theme** - *required for the `!checks` callout*
-- **Templater** - *required to build the tracker inside any note using User Scripts*
-	- Make sure the `Template folder location` is set to a folder in your vault.
-	- Make sure `User Scripts/Script files folder location` is set to a different folder in your vault.
-- **Meta-Bind** - *required for buttons and input fields*
-	- JavaScript must be enabled in Settings
-- **JS Engine** - *required for running JavaScript from Meta-Bind buttons*
-- (Optional) **Calendarium** – *optional for adding custom calendar formatting via the Calendarium API*. The turn tracker will display your fantasy weekday, day number, and month names instead of real-world dates.
+Download `main.js`, `manifest.json`, and `styles.css` from the
+[latest release](../../releases/latest) into
+`<vault>/.obsidian/plugins/osr-turn-tracker/`, then enable the plugin in
+**Settings → Community plugins**.
 
-## Setup
+### BRAT
 
-1. Backup your vault. I mean it.
-2. Add all folders and notes in the repository to your vault.
-3. Make sure all dependencies are installed and configured as directed above. 
-4. Restart Obsidian.
-5. Add the `TurnTracker/Turn Tracker Template.md` note to your **Templater** `Template folder location` folder *(or set your Templater folder to `TurnTracker`)*.
-6. Add the `TemplaterScripts/build_turn_tracker.js` file to your **Templater `User Scripts`** folder *(or set your user scripts folder to `TemplaterScripts`)*.
-7. Make sure the `MetabindScripts` folder is in the **root directory** of your vault. 
-	1. If you move the scripts to a different folder, the `Button Templates` will need to be modified to point to the new folder location. *(Note that these scripts should not be stored in the Templater User Scripts folder due to compatibility issues).*
-8. Follow the instructions in `Button Templates.md` to setup the buttons used by the turn tracker.
-9. Open `Demo Session Note` and try it out!
+Add this repository in the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin to
+track pre-release builds.
 
-## General Usage
+## Usage
 
-Add the button from `Demo Session Note` to any note. The tracker's behaviour depends on the frontmatter in that note:
+Run the **Insert Turn Tracker** command (or type the block by hand) to drop a tracker:
 
-| Frontmatter                    | Behaviour                                                      | Header Format                                  |
-| ------------------------------ | -------------------------------------------------------------- | ---------------------------------------------- |
-| None                           | Starts at **Day 1**, 8am                                       | `Day N`                                        |
-| `startTime (Date & Time)` only | Starts at the given date and time                              | Real date (e.g. `Saturday 21st May 2016`)      |
-| `fc-calendar (String)` only    | Starts at Calendarium calendars "today" date, 8am              | Fantasy date (e.g. `Fireday, 22 Growfest 591`) |
-| `startTime` and `fc-calendar`  | Starts at the given date and time in the Calendarium calendar. | Fantasy date (e.g `Fireday, 22 Growfest 591`)  |
-## Known Issues
+````markdown
+```turn-tracker
+position: 0
+```
+````
 
-- Too many labels on a single row (or labels that are too long) can break the formatting when the row gets too wide to render.
+When inserted into a note that has a `startTime` and/or `fc-calendar` frontmatter field,
+those seed the block's `start` and `calendar`. Then use the widget:
+
+- **End Turn / +Xh** — advance time. The caret next to a button opens the other options.
+- **Torch / Lantern / Custom…** — add a marker starting now. "Custom…" prompts for a label
+  and a duration (number or dice).
+- **Note** — attach a note at the current turn.
+- **Click a box** to jump; **right-click a box** to start a marker or note on that exact turn.
+- **Right-click a day header → Copy tracker state** to clone the session into a new note.
+- In the effect panel, click a marker's name to rename it, click its turns-left number to set
+  it, and right-click for Pause / Resume / Delete.
+
+The plugin rewrites the code block in place on each action, so the note always reflects the
+current state.
+
+## Calendarium (optional)
+
+If a block has a `calendar` and the Calendarium plugin is installed, day headers render your
+fantasy weekday, day, month, and year. If Calendarium is missing, the tracker still works and
+falls back to `Day N` with a one-time notice.
+
+## Development
+
+```sh
+npm install
+npm run build   # type-check + bundle to main.js
+npm test        # vitest unit tests
+```
+
+The core (parse, serialize, state transforms, grid/panel/marker models, dates) is pure and
+unit-tested; `main.ts` and `render.ts` are the thin Obsidian/DOM glue.
+
+## License
+
+MIT
