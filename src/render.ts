@@ -1,5 +1,5 @@
 import { Menu, debounce, setIcon } from "obsidian";
-import { LightPreset, TrackerState } from "./model";
+import { LightPreset, PRESET_FALLBACK_ICON, TrackerState } from "./model";
 import { computeGrid, DayNote } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerEvent, MarkerPhase, inSegments, markerEventAt } from "./markers";
@@ -30,18 +30,22 @@ function openMenu(evt: MouseEvent, items: MenuItemSpec[]): void {
 /** Menu item that lights a preset (control bar and box menu; `startsAt` defaults to the current turn). */
 const presetItem = (handlers: TrackerHandlers, p: LightPreset, startsAt?: number): MenuItemSpec => ({
   title: p.label,
+  icon: p.icon || PRESET_FALLBACK_ICON,
   onClick: () => handlers.onLight(p.id, p.turns, startsAt),
 });
 
 /** Menu item that opens the Custom-effect dialog (`startsAt` defaults to the current turn). */
 const customItem = (handlers: TrackerHandlers, startsAt?: number): MenuItemSpec => ({
   title: "Custom…",
+  icon: "sparkles",
   onClick: () => handlers.onAddEffect(startsAt),
 });
 
-/** Append a "×" delete chip that runs `onDelete` (stopping propagation so it doesn't also select). */
+/** Append a trash-can delete control that runs `onDelete` (stopping propagation so it doesn't also select). */
 function deleteChip(parent: HTMLElement, onDelete: () => void): void {
-  parent.createSpan({ cls: "osr-tt-chip-x", text: "×" }).addEventListener("click", (evt) => {
+  const chip = parent.createSpan({ cls: "osr-tt-chip-x", attr: { "aria-label": "Delete" } });
+  setIcon(chip, "trash");
+  chip.addEventListener("click", (evt) => {
     evt.stopPropagation();
     onDelete();
   });

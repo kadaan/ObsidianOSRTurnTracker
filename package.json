@@ -1,6 +1,6 @@
 {
   "name": "osr-turn-tracker",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "An OSR dungeon turn tracker for Obsidian: track exploration turns, light sources, and timed effects.",
   "main": "main.js",
   "scripts": {

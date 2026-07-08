@@ -10,6 +10,7 @@ import {
   Plugin,
   PluginSettingTab,
   Setting,
+  setIcon,
   TextComponent,
   TFile,
 } from "obsidian";
@@ -37,7 +38,15 @@ import { rollDuration } from "./dice";
 import { BlockRange, findTrackerBlockAt } from "./block";
 import { fenceTrackerBlock } from "./serialize";
 import { seedTrackerState } from "./seed";
-import { LightPreset, TRACKER_LANG, TURNS_PER_DAY, Transform, TrackerState, dayOf } from "./model";
+import {
+  LightPreset,
+  PRESET_FALLBACK_ICON,
+  TRACKER_LANG,
+  TURNS_PER_DAY,
+  Transform,
+  TrackerState,
+  dayOf,
+} from "./model";
 import { makeFantasyDayHeader } from "./calendarium";
 import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
 
@@ -518,6 +527,26 @@ class OsrSettingsTab extends PluginSettingTab {
         });
       });
 
+      label("Icon");
+      // Live preview: renders the typed Lucide icon, so an invalid name shows as an empty box.
+      const iconPreview = createSpan({ cls: "osr-tt-preset-icon-preview" });
+      const renderPreview = (name: string) => {
+        iconPreview.empty();
+        if (name) setIcon(iconPreview, name);
+      };
+      row.addText((t) => {
+        t.inputEl.addClass("osr-tt-preset-icon");
+        t.setPlaceholder(PRESET_FALLBACK_ICON).setValue(preset.icon ?? "").onChange(async (v) => {
+          const icon = v.trim();
+          if (icon) preset.icon = icon;
+          else delete preset.icon;
+          renderPreview(icon);
+          await this.plugin.saveSettings();
+        });
+      });
+      row.controlEl.appendChild(iconPreview);
+      renderPreview(preset.icon ?? "");
+
       label("Turns");
       row.addText((t) => {
         t.inputEl.addClass("osr-tt-preset-turns");
@@ -546,6 +575,7 @@ class OsrSettingsTab extends PluginSettingTab {
         s.presets.push({
           id: `preset-${Math.random().toString(36).slice(2, 8)}`,
           label: "New light",
+          icon: PRESET_FALLBACK_ICON,
           turns: 6,
           pausable: true,
         });

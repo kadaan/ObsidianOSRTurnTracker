@@ -10,6 +10,8 @@ export const DEFAULT_ADVANCE_SHORTCUTS = [1, 3, 8];
 export interface LightPreset {
   id: string;
   label: string;
+  /** Lucide icon id shown beside the preset in menus (mobile only — desktop native menus omit icons). */
+  icon?: string;
   /** Duration in turns. */
   turns: number;
   /** Whether instances of this preset can be paused/resumed (freezing their burn). */
@@ -17,9 +19,12 @@ export interface LightPreset {
 }
 
 export const DEFAULT_LIGHT_PRESETS: LightPreset[] = [
-  { id: "torch", label: "Torch", turns: 6, pausable: true },
-  { id: "lantern", label: "Lantern", turns: 24, pausable: true },
+  { id: "torch", label: "Torch", icon: "flame", turns: 6, pausable: true },
+  { id: "lantern", label: "Lantern", icon: "lamp", turns: 24, pausable: true },
 ];
+
+/** Icon used for a preset with no `icon` set — also the default for newly-created presets. */
+export const PRESET_FALLBACK_ICON = "lightbulb";
 
 /** Turns rendered past the furthest marker/position, for look-ahead. A setting later. */
 export const LOOKAHEAD_BUFFER = 6;

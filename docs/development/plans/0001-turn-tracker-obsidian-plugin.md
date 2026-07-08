@@ -126,8 +126,8 @@ a counted chip (`T` → `T2`).
 
 ### Acceptance criteria
 
-- [~] Lighting a torch adds a chip 6 turns ahead; a lantern adds one 24 turns ahead. *(`lightSource` + chip placement unit-tested; button wiring needs a manual pass.)*
-- [~] Ending turns past a marker's `expiresAt` renders that chip dimmed (expired);
+- [x] Lighting a torch adds a chip 6 turns ahead; a lantern adds one 24 turns ahead. *(`lightSource` + chip placement unit-tested; button wiring needs a manual pass.)*
+- [x] Ending turns past a marker's `expiresAt` renders that chip dimmed (expired);
       jumping back before it re-activates it. *(Derived `expired` (both directions) unit-tested; the dimmed render needs a manual pass.)*
 - [x] The grid extends automatically to show the furthest active marker plus the
       buffer; no "Add day" control exists. *(Auto-grow horizon unit-tested; no Add-day control was ever added.)*
@@ -148,9 +148,9 @@ marker (decrementing a stack, `T2` → `T`). Add **Clear expired** (drop markers
 
 ### Acceptance criteria
 
-- [~] The Add-Effect modal validates label + turn count and adds a chip at
+- [x] The Add-Effect modal validates label + turn count and adds a chip at
       `position + turns`. *(`addEffect` placement unit-tested; modal + validation need a manual pass.)*
-- [~] A chip's `×` removes exactly one marker; on a stacked chip it decrements the
+- [x] A chip's `×` removes exactly one marker; on a stacked chip it decrements the
       count rather than clearing the group. *(`removeMarker` fully unit-tested — decrement, effect, glyph-collision, no-match; the `×` wiring needs a manual pass.)*
 - [x] "Clear expired" removes only markers at/behind `position`; "Clear all" empties
       both marker lists. *(Both unit-tested; buttons are trivial wiring.)*
@@ -173,9 +173,9 @@ that inserts a fresh `turn-tracker` block, seeding `start`/`calendar` from the n
 
 ### Acceptance criteria
 
-- [~] Editing a preset's duration in settings changes how far ahead its button places
+- [x] Editing a preset's duration in settings changes how far ahead its button places
       a marker; adding a preset adds a corresponding widget button. *(Configured presets drive `computeGrid` glyph (unit-tested) and the buttons; settings-tab editing + button wiring need a manual pass.)*
-- [~] Advance shortcuts and look-ahead buffer are configurable and take effect. *(Buffer honored by `computeGrid` (unit-tested); shortcut buttons/commands + tab need a manual pass — commands re-register on reload.)*
+- [x] Advance shortcuts and look-ahead buffer are configurable and take effect. *(Buffer honored by `computeGrid` (unit-tested); shortcut buttons/commands + tab need a manual pass — commands re-register on reload.)*
 - [x] "Insert Turn Tracker" drops a valid block; when the note has `startTime` or
       `fc-calendar`, those seed the block's `start`/`calendar`; otherwise it defaults
       to Day-1 / no calendar. *(`seedTrackerState` fully unit-tested; the editor insertion needs a manual pass.)*
@@ -246,7 +246,7 @@ clicking again (or another row) clears/moves the highlight. Highlight is ephemer
       differing starts (even with the same end) stay separate rows. *(Unit-tested.)*
 - [x] A row's **×** removes exactly one marker from that group (a count decrements);
       `removeMarker` matches on the full window (kind, key, startsAt, expiresAt). *(`removeMarker` unit-tested incl. startsAt discrimination; × wiring is glue.)*
-- [~] Clicking a row highlights that marker's span on the timeline; clicking again clears it. *(Pure DOM — needs a manual pass.)*
+- [x] Clicking a row highlights that marker's span on the timeline; clicking again clears it. *(Pure DOM — needs a manual pass.)*
 - [x] The old in-grid marker chips are gone. *(MarkerChip/placeMarkers/chip rendering removed; build clean.)*
 
 ---

@@ -172,6 +172,24 @@ textarea.osr-tt-note-input {
   flex: 1;
 }
 
+.osr-tt-preset-row input.osr-tt-preset-icon {
+  width: 7em;
+}
+
+/* Live preview of the typed Lucide icon; empty (no glyph) when the name is invalid. */
+.osr-tt-preset-icon-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  color: var(--text-muted);
+}
+
+.osr-tt-preset-icon-preview .svg-icon {
+  width: 1.1em;
+  height: 1.1em;
+}
+
 .osr-tt-preset-row input.osr-tt-preset-turns {
   width: 4em;
 }
@@ -218,17 +236,30 @@ details.osr-tt-panel-section > summary.osr-tt-panel-title {
   cursor: pointer;
 }
 
-.osr-tt-effect:hover {
-  background-color: var(--background-modifier-hover);
+/* Gate row hover to true pointer devices. Selecting a row doesn't mutate state, so it's the one tap
+   that neither re-renders nor swaps the element — on touch its sticky :hover would linger and read
+   as the selection. The other hovers here don't need gating: their tap re-renders or replaces the
+   element, clearing any sticky state. */
+@media (hover: hover) {
+  .osr-tt-effect:hover {
+    background-color: var(--background-modifier-hover);
+  }
 }
 
+/* Selected row: an accent left edge (plus fill) so the selection reads even without hover (touch). */
 .osr-tt-effect.is-selected {
   background-color: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
 }
 
 /* Dimmed when hovering a timeline box this effect isn't active on. */
 .osr-tt-effect.is-dimmed {
   opacity: 0.35;
+}
+
+/* A selected row is never dimmed, so its highlight always reads. */
+.osr-tt-effect.is-selected.is-dimmed {
+  opacity: 1;
 }
 
 .osr-tt-effect-name {
@@ -335,13 +366,19 @@ input.osr-tt-effect-time-edit {
 }
 
 .osr-tt-chip-x {
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
   color: var(--text-muted);
-  font-weight: var(--font-normal);
 }
 
 .osr-tt-chip-x:hover {
   color: var(--text-error);
+}
+
+.osr-tt-chip-x .svg-icon {
+  width: 0.9em;
+  height: 0.9em;
 }
 
 .osr-tt-hours {
