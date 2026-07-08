@@ -3,6 +3,7 @@ import {
   calendarError,
   calendarNames,
   currentDateAsStart,
+  defaultCalendarName,
   makeFantasyDayHeader,
   setCalendariumCurrentDate,
 } from "./calendarium";
@@ -174,6 +175,24 @@ describe("calendarNames", () => {
     expect(calendarNames()).toEqual([]);
     stubCalendarium({ getAPI: () => ({}) }); // no getCalendars
     expect(calendarNames()).toEqual([]);
+  });
+});
+
+describe("defaultCalendarName", () => {
+  it("returns the name of Calendarium's default calendar (getAPI with no argument)", () => {
+    stubCalendarium({
+      getAPI: (name?: string) => ({ getObject: () => ({ name: name ?? "Default Cal", static: { months: [] } }) }),
+    });
+    expect(defaultCalendarName()).toBe("Default Cal");
+  });
+
+  it("returns undefined when Calendarium is absent or has no default", () => {
+    stubCalendarium(undefined);
+    expect(defaultCalendarName()).toBeUndefined();
+    stubCalendarium({
+      getAPI: () => ({ getObject: () => ({ name: "", static: { months: [] } }) }),
+    });
+    expect(defaultCalendarName()).toBeUndefined();
   });
 });
 

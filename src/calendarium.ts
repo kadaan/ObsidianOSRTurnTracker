@@ -1,4 +1,4 @@
-import { dayOf, TrackerState, wrap } from "./model";
+import { dayOf, nonEmptyString, TrackerState, wrap } from "./model";
 import { parseStart } from "./dates";
 
 type NamedEntry = string | { name: string };
@@ -35,7 +35,7 @@ interface MonthStore {
 
 /** The subset of Calendarium's per-calendar API this plugin relies on (soft dependency). */
 interface CalendarApi {
-  getObject(): { static: { months: MonthEntry[] } };
+  getObject(): { name: string; static: { months: MonthEntry[] } };
   getStore(): {
     /** Add `offset` days to `date` via the calendar's own increment logic (leap/intercalary aware). */
     getOffsetDate?(date: CalDate, offset: number): CalDate;
@@ -52,7 +52,8 @@ interface CalendarApi {
 }
 
 interface CalendariumApi {
-  getAPI(name: string): CalendarApi;
+  /** With no name, returns the default calendar's API. */
+  getAPI(name?: string): CalendarApi;
   /** Names of every calendar Calendarium knows; absent on older builds. */
   getCalendars?(): string[];
 }
@@ -60,6 +61,18 @@ interface CalendariumApi {
 /** Calendarium's global API object, if the plugin is loaded. The one place we reach into `window`. */
 const getCalendarium = (): CalendariumApi | undefined =>
   (window as unknown as { Calendarium?: CalendariumApi }).Calendarium;
+
+/** The per-calendar API for `name` (or the default calendar), guarded; undefined if Calendarium is
+ *  absent or the lookup throws. Callers do the rest inside their own try for the per-call work. */
+function getCalendarApi(name?: string): CalendarApi | undefined {
+  const calendarium = getCalendarium();
+  if (!calendarium?.getAPI) return undefined;
+  try {
+    return calendarium.getAPI(name);
+  } catch {
+    return undefined;
+  }
+}
 
 const isCalDate = (d: unknown): d is CalDate => {
   const c = d as CalDate | null;
@@ -151,6 +164,19 @@ export function calendarNames(): string[] {
 }
 
 /**
+ * The name of Calendarium's default calendar (its global setting), for seeding a new tracker when no
+ * calendar property is set on the note. Undefined when Calendarium is absent or has no default.
+ * Note: Calendarium's default is global — it exposes no path-based per-note calendar to honor here.
+ */
+export function defaultCalendarName(): string | undefined {
+  try {
+    return nonEmptyString(getCalendarApi()?.getObject().name); // no name → the default calendar
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * An error message when `calendar` names a calendar Calendarium doesn't have — so a typo'd name
  * fails loudly instead of silently degrading to Day-N. Undefined when the name is valid, unset, or
  * unverifiable (Calendarium not installed, or too old to list calendars — the tracker still works
@@ -177,11 +203,10 @@ const START_FORMAT_CANDIDATES: (string | undefined)[] = [undefined, "Y-M-D", "D-
  * so we never write a `start` the fantasy header can't read.
  */
 export function currentDateAsStart(calendar: string): string | undefined {
-  const calendarium = getCalendarium();
-  if (!calendarium?.getAPI) return undefined;
+  const api = getCalendarApi(calendar);
+  if (!api) return undefined;
 
   try {
-    const api = calendarium.getAPI(calendar);
     const current = api.getCurrentDate();
     for (const format of START_FORMAT_CANDIDATES) {
       const start = api.toDisplayDate(current, null, format);
@@ -211,14 +236,13 @@ export function makeFantasyDayHeader(
 ): ((dayIndex: number) => string) | undefined {
   if (!state.calendar) return undefined;
 
-  const calendarium = getCalendarium();
-  if (!calendarium?.getAPI) {
+  const api = getCalendarApi(state.calendar);
+  if (!api) {
     onWarn();
     return undefined;
   }
 
   try {
-    const api = calendarium.getAPI(state.calendar);
     const { months } = api.getObject().static;
     const store = api.getStore();
     const base = resolveBase(api, state.start);
@@ -264,11 +288,10 @@ export function makeFantasyDayHeader(
 export function setCalendariumCurrentDate(state: TrackerState): void {
   if (!state.calendar || !state.start) return;
 
-  const calendarium = getCalendarium();
-  if (!calendarium?.getAPI) return;
+  const api = getCalendarApi(state.calendar);
+  if (!api) return;
 
   try {
-    const api = calendarium.getAPI(state.calendar);
     const store = api.getStore();
     const base = parseStartDate(api, state.start);
     if (!store.setCurrentDate || !base) return; // no setter / no stable anchor → leave Calendarium alone

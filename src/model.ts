@@ -50,6 +50,10 @@ export const dayOf = (turn: number): number => Math.floor(turn / TURNS_PER_DAY);
 /** Positive modulo: `value` wrapped into `[0, size)` even when `value` is negative. */
 export const wrap = (value: number, size: number): number => ((value % size) + size) % size;
 
+/** `value` when it's a non-empty string, else undefined — for validating stored/external strings. */
+export const nonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value ? value : undefined;
+
 /**
  * Upper bound on `position`, guarding against a hand-entered value that would
  * render millions of boxes and freeze the renderer. A year of in-game time is a

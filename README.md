@@ -61,11 +61,13 @@ position: 0
 ```
 ````
 
-When inserted into a note that has a `startTime` and/or `fc-calendar` frontmatter field,
-those seed the block's `start` and `calendar`. Whenever a block has a `calendar` but no `start`
-(whether seeded from frontmatter or typed into the block), the tracker fills `start` from
-Calendarium's current date on first render — anchoring it to "today" so date-sync works
-immediately. Then use the widget:
+When inserted into a note, the block's `calendar` and `start` are seeded from the note's
+frontmatter — by default the `fc-calendar` property (Calendarium's own, so a note already tagged
+for Calendarium just works) and `osrtt-ingame-date`. Both property names are configurable in
+settings. If no calendar property is present, the tracker falls back to Calendarium's default
+calendar. Whenever a block ends up with a `calendar` but no `start` (seeded, defaulted, or typed
+into the block), the tracker fills `start` from Calendarium's current date on first render —
+anchoring it to "today" so date-sync works immediately. Then use the widget:
 
 - **End Turn / +Xh** — advance time. The caret next to a button opens the other options.
 - **Torch / Lantern / Custom…** — add a marker starting now. "Custom…" prompts for a label

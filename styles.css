@@ -366,6 +366,13 @@ input.osr-tt-effect-time-edit {
   height: 0.9em;
 }
 
+/* Dim + block a settings row we've disabled (e.g. Calendarium options when it's not installed).
+   Obsidian doesn't reliably style .is-disabled itself; scope to our tab so we don't affect others. */
+.osr-tt-settings .setting-item.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* Muted right-hand hint in the editor autocomplete (e.g. "preset" beside a type value). */
 .osr-tt-suggest-hint {
   margin-left: 0.6em;

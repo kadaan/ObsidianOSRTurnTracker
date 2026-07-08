@@ -47,6 +47,7 @@ import {
   CUSTOM_TYPE,
   LEGACY_EFFECT_KEYS,
   LightPreset,
+  nonEmptyString,
   TOP_LEVEL_KEYS,
   TRACKER_LANG,
   TURNS_PER_DAY,
@@ -58,11 +59,17 @@ import {
   calendarError,
   calendarNames,
   currentDateAsStart,
+  defaultCalendarName,
   isCalendariumAvailable,
   makeFantasyDayHeader,
   setCalendariumCurrentDate,
 } from "./calendarium";
-import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
+import {
+  createDefaultSettings,
+  DEFAULT_CALENDAR_PROPERTY,
+  DEFAULT_START_PROPERTY,
+  OsrTurnTrackerSettings,
+} from "./settings";
 
 export default class OsrTurnTrackerPlugin extends Plugin {
   settings: OsrTurnTrackerSettings = createDefaultSettings();
@@ -93,6 +100,8 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         typeof loaded.syncCalendariumDate === "boolean"
           ? loaded.syncCalendariumDate
           : defaults.syncCalendariumDate,
+      calendarProperty: nonEmptyString(loaded.calendarProperty) ?? defaults.calendarProperty,
+      startProperty: nonEmptyString(loaded.startProperty) ?? defaults.startProperty,
     };
     this.effectHistory = normalizeEffectHistory(loaded.effectHistory);
     this.addSettingTab(new OsrSettingsTab(this.app, this));
@@ -195,7 +204,15 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         const frontmatter = file
           ? this.app.metadataCache.getFileCache(file)?.frontmatter
           : undefined;
-        const state = seedTrackerState(frontmatter);
+        const state = seedTrackerState(frontmatter, {
+          calendarProperty: this.settings.calendarProperty,
+          startProperty: this.settings.startProperty,
+        });
+        // No calendar on the note → fall back to Calendarium's default calendar, if any.
+        if (!state.calendar) {
+          const fallback = defaultCalendarName();
+          if (fallback) state.calendar = fallback;
+        }
         // With a fantasy calendar but no explicit start, anchor the tracker to Calendarium's current
         // date so day-headers and date-sync work out of the box.
         if (state.calendar && !state.start) {
@@ -857,6 +874,7 @@ class OsrSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     const s = this.plugin.settings;
     containerEl.empty();
+    containerEl.addClass("osr-tt-settings"); // scope for the disabled-row styling
 
     new Setting(containerEl)
       .setName("Look-ahead buffer")
@@ -879,14 +897,42 @@ class OsrSettingsTab extends PluginSettingTab {
         }),
       );
 
+    this.propertyText({
+      name: "In-game date property",
+      desc: "Note frontmatter property a new tracker reads its in-game start date from.",
+      value: s.startProperty,
+      fallback: DEFAULT_START_PROPERTY,
+      set: (v) => (s.startProperty = v),
+    });
+
     const calendariumAvailable = isCalendariumAvailable();
+
+    new Setting(containerEl).setName("Calendarium").setHeading();
+    if (!calendariumAvailable) {
+      new Setting(containerEl).setDesc(
+        "The Calendarium plugin isn't installed or enabled, so these options are unavailable.",
+      );
+    }
+
+    this.propertyText({
+      name: "Calendar property",
+      desc:
+        "Note frontmatter property a new tracker reads its calendar name from. " +
+        "Falls back to Calendarium's default calendar when unset.",
+      value: s.calendarProperty,
+      fallback: DEFAULT_CALENDAR_PROPERTY,
+      disabled: !calendariumAvailable,
+      set: (v) => (s.calendarProperty = v),
+    });
+
     new Setting(containerEl)
-      .setName("Sync Calendarium date")
+      .setName("Sync current date")
       .setDesc(
-        calendariumAvailable
-          ? "When a turn advances to a new day, set the Calendarium calendar's current date to the tracker's date. Requires a start date."
-          : "Requires the Calendarium plugin, which isn't installed or enabled.",
+        "When a turn advances to a new day, set the Calendarium calendar's current date to the tracker's date. Requires a start date.",
       )
+      // Row .setDisabled dims + blocks the mouse (via CSS); the control's own .setDisabled also blocks
+      // keyboard focus — both are needed for a fully-disabled row.
+      .setDisabled(!calendariumAvailable)
       .addToggle((t) =>
         t
           .setValue(s.syncCalendariumDate)
@@ -1047,6 +1093,32 @@ class OsrSettingsTab extends PluginSettingTab {
         this.display();
       },
     ).open();
+  }
+
+  /** A settings row for a frontmatter-property name: trims input and restores the default when
+   *  cleared. When `disabled`, the row is dimmed/mouse-blocked (row) and keyboard-blocked (control). */
+  private propertyText(opts: {
+    name: string;
+    desc: string;
+    value: string;
+    fallback: string;
+    disabled?: boolean;
+    set: (value: string) => void;
+  }): void {
+    new Setting(this.containerEl)
+      .setName(opts.name)
+      .setDesc(opts.desc)
+      .setDisabled(!!opts.disabled)
+      .addText((t) =>
+        t
+          .setPlaceholder(opts.fallback)
+          .setValue(opts.value)
+          .setDisabled(!!opts.disabled)
+          .onChange(async (v) => {
+            opts.set(v.trim() || opts.fallback);
+            await this.plugin.saveSettings();
+          }),
+      );
   }
 
   /** Wire a text field as a whole-number input (≥ min) that persists valid values. */

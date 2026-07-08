@@ -14,7 +14,16 @@ export interface OsrTurnTrackerSettings {
   lookaheadBuffer: number;
   /** When a turn advances to a new day, set the Calendarium calendar's current date to match. */
   syncCalendariumDate: boolean;
+  /** Frontmatter property a new tracker reads its calendar name from. */
+  calendarProperty: string;
+  /** Frontmatter property a new tracker reads its in-game start date from. */
+  startProperty: string;
 }
+
+// Default to Calendarium's own per-note calendar property, so a note already tagged for Calendarium
+// works with the tracker without extra configuration.
+export const DEFAULT_CALENDAR_PROPERTY = "fc-calendar";
+export const DEFAULT_START_PROPERTY = "osrtt-ingame-date";
 
 /** Fresh default settings — never shares array/object instances with the module defaults. */
 export const createDefaultSettings = (): OsrTurnTrackerSettings => ({
@@ -22,4 +31,6 @@ export const createDefaultSettings = (): OsrTurnTrackerSettings => ({
   advanceShortcuts: [...DEFAULT_ADVANCE_SHORTCUTS],
   lookaheadBuffer: LOOKAHEAD_BUFFER,
   syncCalendariumDate: false,
+  calendarProperty: DEFAULT_CALENDAR_PROPERTY,
+  startProperty: DEFAULT_START_PROPERTY,
 });
