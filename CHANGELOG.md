@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.5]
+
+- Invalid Calendarium **start dates now raise a clear error** instead of being silently coerced to the
+  wrong day — this catches values written in the wrong segment order (e.g. a year in the day slot) and
+  unrecognized month names, with a hint showing the calendar's expected format.
+- A tracker resolves its calendar and start with a clear precedence: the **block's own values first**,
+  then the note's frontmatter, then Calendarium's defaults — so a corrected frontmatter value reloads a
+  block that never got a valid one written.
+- Missing calendar/start values are now backfilled through **safe writes** that no longer race an open
+  editor buffer, fixing a duplicated block and "modified externally" notice when inserting a tracker.
+
+## [2.0.4]
+
+- New settings to seed a tracker's calendar and start date from **custom frontmatter properties**
+  (defaulting to `fc-calendar` and `osrtt-ingame-date`).
+- Falls back to **Calendarium's default calendar** for the note when no calendar property is set.
+- The Calendarium-only settings are disabled when the plugin isn't installed.
+
+## [2.0.3]
+
+- Fantasy **day headers now match Calendarium exactly** — weekday and month names come from
+  Calendarium's own per-month store and dates are formatted through its display formatter, replacing
+  the previous approximate weekday formula.
+- A block with a calendar but no start is **auto-anchored to Calendarium's current date**, so new and
+  existing trackers line up with today out of the box.
+- Referencing an **unknown calendar name** now shows a clear error instead of silently falling back to
+  `Day N`, and the editor autocomplete suggests known calendar names.
+
 ## [2.0.2]
 
 - Presets can now use **dice durations** (e.g. `2d6+1`), rolled each time the light is lit.

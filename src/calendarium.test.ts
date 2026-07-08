@@ -6,6 +6,7 @@ import {
   defaultCalendarName,
   makeFantasyDayHeader,
   setCalendariumCurrentDate,
+  startDateError,
 } from "./calendarium";
 import { TrackerState } from "./model";
 
@@ -221,6 +222,61 @@ describe("calendarError", () => {
   it("returns undefined when Calendarium is too old to list calendars", () => {
     stubCalendarium({ getAPI: () => ({}) }); // no getCalendars
     expect(calendarError("Dolmenwood")).toBeUndefined();
+  });
+});
+
+describe("startDateError", () => {
+  // A tiny day-month-year calendar: parse assigns segments positionally (like Calendarium's
+  // formatDigest), coercing non-numeric day/year to 1 and wrapping the month — so a wrong-order
+  // value parses into a valid-but-different date. Format is the inverse: `<day>-<MonthName>-<year>`.
+  const MONTHS = ["Grimvold", "Lymewald"];
+  const dmyCalendar = {
+    getAPI: () => ({
+      getObject: () => ({ name: "Dolmenwood", dateFormat: "D-MMMM-Y", static: { months: MONTHS.map((name) => ({ name })) } }),
+      getStore: () => ({}),
+      getCurrentDate: () => ({ day: 15, month: 0, year: 1089 }),
+      parseDate: (s: string) => {
+        const [d, m, y] = s.split("-");
+        const num = (x: string | undefined, fallback: number) => (/^\d+$/.test(x ?? "") ? Number(x) : fallback);
+        const monthIdx = /^\d+$/.test(m ?? "")
+          ? Number(m) - 1
+          : MONTHS.findIndex((n) => n.toLowerCase() === (m ?? "").toLowerCase());
+        return { day: num(d, 1), month: ((monthIdx % MONTHS.length) + MONTHS.length) % MONTHS.length, year: num(y, 1) };
+      },
+      toDisplayDate: (dte: { day: number; month: number; year: number }) => `${dte.day}-${MONTHS[dte.month]}-${dte.year}`,
+    }),
+    getCalendars: () => ["Dolmenwood"],
+  };
+
+  it("returns undefined when each segment fits its slot (correct order, padding/number aside)", () => {
+    stubCalendarium(dmyCalendar);
+    expect(startDateError("Dolmenwood", "2-Grimvold-1089")).toBeUndefined();
+    expect(startDateError("Dolmenwood", "02-Grimvold-1089")).toBeUndefined();
+    expect(startDateError("Dolmenwood", "2-1-1089")).toBeUndefined(); // numeric month in range
+  });
+
+  it("errors when a name lands in a numeric slot (wrong segment order)", () => {
+    stubCalendarium(dmyCalendar);
+    const error = startDateError("Dolmenwood", "Grimvold-1089-2");
+    expect(error).toContain("Grimvold-1089-2"); // the offending value
+    expect(error).toContain("Dolmenwood");
+    expect(error).toContain("day-month-year"); // order derived from dateFormat
+    expect(error).toContain("15-Grimvold-1089"); // example from the current date
+  });
+
+  it("errors when the month name isn't a real month (Calendarium would silently default it)", () => {
+    stubCalendarium(dmyCalendar);
+    const error = startDateError("Dolmenwood", "2-AAAGrimvold-1089");
+    expect(error).toContain("2-AAAGrimvold-1089");
+    expect(error).toContain("day-month-year");
+  });
+
+  it("returns undefined without a calendar, without a start, or when Calendarium is absent", () => {
+    stubCalendarium(dmyCalendar);
+    expect(startDateError(undefined, "Grimvold-1089-2")).toBeUndefined();
+    expect(startDateError("Dolmenwood", undefined)).toBeUndefined();
+    stubCalendarium(undefined);
+    expect(startDateError("Dolmenwood", "Grimvold-1089-2")).toBeUndefined();
   });
 });
 

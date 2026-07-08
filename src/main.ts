@@ -10,6 +10,7 @@ import {
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownRenderer,
+  MarkdownView,
   Modal,
   Notice,
   Plugin,
@@ -63,6 +64,7 @@ import {
   isCalendariumAvailable,
   makeFantasyDayHeader,
   setCalendariumCurrentDate,
+  startDateError,
 } from "./calendarium";
 import {
   createDefaultSettings,
@@ -113,23 +115,31 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         renderError(el, result.error);
         return;
       }
-      // A typo'd calendar name should fail loudly, not silently fall back to Day-N.
-      const calErr = calendarError(result.state.calendar);
+      // Resolve the effective calendar/start: the block's own values (authoritative once written),
+      // then note frontmatter (fills a block that still lacks its own value, so a corrected
+      // frontmatter reloads it), then Calendarium's default calendar / current date.
+      const frontmatter = this.app.metadataCache.getCache(ctx.sourcePath)?.frontmatter;
+      const resolved = this.resolveState(result.state, frontmatter);
+      // A typo'd calendar name or an unparseable start fails loudly rather than silently defaulting.
+      const calErr = calendarError(resolved.calendar) ?? startDateError(resolved.calendar, resolved.start);
       if (calErr) {
         renderError(el, calErr);
         return;
       }
-      // A block with a fantasy calendar but no start can't sync dates. Anchor it to Calendarium's
-      // current date once, writing it back to the block (the re-render then picks up the start).
-      if (result.state.calendar && !result.state.start) {
-        const start = currentDateAsStart(result.state.calendar);
-        if (start) this.backfillStart(el, ctx, start);
+      const state = { ...result.state, calendar: resolved.calendar, start: resolved.start };
+      // Anchor a block that's missing calendar/start by persisting the resolved values — but only in
+      // reading mode. Writing to a file open in an editor races its unsaved buffer and duplicates the
+      // block (the insert command bakes for the edit-mode case via a safe editor write instead).
+      const anchorCalendar = resolved.calendar && !result.state.calendar;
+      const anchorStart = resolved.start && !result.state.start;
+      if ((anchorCalendar || anchorStart) && !this.isFileBeingEdited(ctx.sourcePath)) {
+        this.backfill(el, ctx, resolved);
       }
       // Own any markdown render-children on a child scoped to this block, so they unload when the
       // block re-renders. Passing the plugin as owner would leak them until the plugin unloads.
       const renderChild = new MarkdownRenderChild(el);
       ctx.addChild(renderChild);
-      renderTracker(el, result.state, this.settings, {
+      renderTracker(el, state, this.settings, {
         onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
@@ -166,7 +176,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onResume: (index) => void this.mutateFromWidget(el, ctx, resumeMarker(index)),
         onSetRemaining: (index, turns) =>
           void this.mutateFromWidget(el, ctx, setRemaining(index, turns)),
-        onCopyState: () => void this.copyState(result.state),
+        onCopyState: () => void this.copyState(state),
         onAddNote: (at) =>
           new NoteModal(this.app, "", (text) => void this.mutateFromWidget(el, ctx, addNote(text, at))).open(),
         onEditNote: (index, text) =>
@@ -177,7 +187,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           new ConfirmModal(this.app, "Delete this note?", () =>
             void this.mutateFromWidget(el, ctx, removeNote(index)),
           ).open(),
-      }, makeFantasyDayHeader(result.state, () => this.warnCalendar()),
+      }, makeFantasyDayHeader(state, () => this.warnCalendar()),
       (host, text) => void MarkdownRenderer.render(this.app, text, host, ctx.sourcePath, renderChild));
     });
 
@@ -204,21 +214,10 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         const frontmatter = file
           ? this.app.metadataCache.getFileCache(file)?.frontmatter
           : undefined;
-        const state = seedTrackerState(frontmatter, {
-          calendarProperty: this.settings.calendarProperty,
-          startProperty: this.settings.startProperty,
-        });
-        // No calendar on the note → fall back to Calendarium's default calendar, if any.
-        if (!state.calendar) {
-          const fallback = defaultCalendarName();
-          if (fallback) state.calendar = fallback;
-        }
-        // With a fantasy calendar but no explicit start, anchor the tracker to Calendarium's current
-        // date so day-headers and date-sync work out of the box.
-        if (state.calendar && !state.start) {
-          const start = currentDateAsStart(state.calendar);
-          if (start) state.start = start;
-        }
+        const base: TrackerState = { position: 0, markers: [] };
+        // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained;
+        // an invalid frontmatter value is left out and surfaces as an error on render.
+        const state = this.fillMissing(base, this.resolveState(base, frontmatter), true);
         editor.replaceSelection(`${fenceTrackerBlock(state)}\n`);
       },
     });
@@ -304,15 +303,83 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       new Notice("Could not locate the tracker block.");
       return;
     }
-    await this.applyToFile(located.file, located.text, located.range, transform);
+    const frontmatter = this.app.metadataCache.getCache(ctx.sourcePath)?.frontmatter;
+    const transformWithDefaults = this.withResolvedDefaults(transform, frontmatter);
+    await this.applyToFile(located.file, located.text, located.range, transformWithDefaults);
   }
 
-  /** Write a resolved `start` back into a block that has none. Quiet (runs during render): if the
-   *  block can't be located this pass, we simply try again on the next render. */
-  private backfillStart(el: HTMLElement, ctx: MarkdownPostProcessorContext, start: string): void {
+  /** The effective calendar/start for a block, in precedence order: the block's own values, then the
+   *  note's frontmatter, then Calendarium's default calendar / current date. The block wins, so once a
+   *  valid value is serialized it's authoritative; a value only comes from frontmatter while the block
+   *  still lacks its own (which is how a corrected frontmatter reloads a block whose invalid value was
+   *  never written). */
+  private resolveState(
+    state: TrackerState,
+    frontmatter: Record<string, unknown> | undefined,
+  ): { calendar?: string; start?: string } {
+    const seeded = seedTrackerState(frontmatter, {
+      calendarProperty: this.settings.calendarProperty,
+      startProperty: this.settings.startProperty,
+    });
+    const calendar = state.calendar ?? seeded.calendar ?? defaultCalendarName();
+    const start = state.start ?? seeded.start ?? (calendar ? currentDateAsStart(calendar) : undefined);
+    return { calendar, start };
+  }
+
+  /** Return `state` with any missing calendar/start filled from `resolved` (never overwriting the
+   *  block's own values). When `validate`, an invalid resolved value is skipped so it's never
+   *  serialized — the block stays gap-filled from frontmatter each render until it's corrected. */
+  private fillMissing(
+    state: TrackerState,
+    resolved: { calendar?: string; start?: string },
+    validate: boolean,
+  ): TrackerState {
+    const calOk =
+      resolved.calendar && !state.calendar && (!validate || !calendarError(resolved.calendar));
+    const startOk =
+      resolved.start &&
+      !state.start &&
+      (!validate || !startDateError(resolved.calendar, resolved.start));
+    return {
+      ...state,
+      ...(calOk ? { calendar: resolved.calendar } : {}),
+      ...(startOk ? { start: resolved.start } : {}),
+    };
+  }
+
+  /** Whether `path` is open in a source/live-preview editor, where writing to disk would race an
+   *  unsaved buffer and duplicate content. Reading-only views are safe to persist under. */
+  private isFileBeingEdited(path: string): boolean {
+    return this.app.workspace.getLeavesOfType("markdown").some((leaf) => {
+      const view = leaf.view;
+      return view instanceof MarkdownView && view.file?.path === path && view.getMode() === "source";
+    });
+  }
+
+  /** Persist the resolved calendar/start into a block that's missing them (never overwriting the
+   *  block's own values). Only called once validated and only in reading mode. Quiet: retries next
+   *  render if the block can't be located this pass. */
+  private backfill(
+    el: HTMLElement,
+    ctx: MarkdownPostProcessorContext,
+    resolved: { calendar?: string; start?: string },
+  ): void {
     const located = this.locateBlock(el, ctx);
     if (!located) return;
-    void this.applyToFile(located.file, located.text, located.range, (s) => (s.start ? s : { ...s, start }));
+    void this.applyToFile(located.file, located.text, located.range, (s) =>
+      this.fillMissing(s, resolved, false),
+    );
+  }
+
+  /** Wrap a transform so it first fills the block's missing calendar/start with resolved, *valid*
+   *  values. This persists them on the user's action (a safe write) rather than during render, and
+   *  never serializes an invalid value — the block stays gap-filled from frontmatter each render
+   *  until it's corrected. */
+  private withResolvedDefaults(
+    transform: Transform,
+    frontmatter: Record<string, unknown> | undefined,
+  ): Transform {
+    return (s) => transform(this.fillMissing(s, this.resolveState(s, frontmatter), true));
   }
 
   /** Write path for the command: block located relative to the editor cursor. */
@@ -325,7 +392,8 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       new Notice("Place the cursor in a turn-tracker block.");
       return;
     }
-    await this.applyToFile(file, text, range, transform);
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    await this.applyToFile(file, text, range, this.withResolvedDefaults(transform, frontmatter));
   }
 
   private async applyToFile(

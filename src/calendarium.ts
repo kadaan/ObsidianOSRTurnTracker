@@ -4,8 +4,9 @@ import { parseStart } from "./dates";
 type NamedEntry = string | { name: string };
 const nameOf = (entry: NamedEntry): string => (typeof entry === "string" ? entry : entry.name);
 
-/** A month as Calendarium exposes it; only its length matters for the day-length fallback. */
+/** A month as Calendarium exposes it; its length feeds the day-length fallback, its name the hints. */
 interface MonthEntry {
+  name?: string;
   length?: number;
 }
 
@@ -35,7 +36,7 @@ interface MonthStore {
 
 /** The subset of Calendarium's per-calendar API this plugin relies on (soft dependency). */
 interface CalendarApi {
-  getObject(): { name: string; static: { months: MonthEntry[] } };
+  getObject(): { name: string; dateFormat?: string; static: { months: MonthEntry[] } };
   getStore(): {
     /** Add `offset` days to `date` via the calendar's own increment logic (leap/intercalary aware). */
     getOffsetDate?(date: CalDate, offset: number): CalDate;
@@ -190,6 +191,88 @@ export function calendarError(calendar: string | undefined): string | undefined 
   if (!Array.isArray(known) || known.includes(calendar)) return undefined;
   const list = known.length ? known.join(", ") : "none";
   return `Unknown Calendarium calendar "${calendar}". Available: ${list}.`;
+}
+
+const SEGMENT_WORD = { Y: "year", M: "month", D: "day" } as const;
+type Segment = keyof typeof SEGMENT_WORD;
+
+/** The Y/M/D segment order Calendarium parses/formats in, read from the calendar's `dateFormat` (the
+ *  position of the first Y, M, D token). Undefined when the format is absent or lacks all three. */
+function segmentOrder(dateFormat: string | undefined): Segment[] | undefined {
+  if (!dateFormat) return undefined;
+  const fmt = dateFormat.toUpperCase();
+  const order = (["Y", "M", "D"] as const)
+    .map((token) => ({ token, at: fmt.indexOf(token) }))
+    .filter((seg) => seg.at >= 0)
+    .sort((a, b) => a.at - b.at)
+    .map((seg) => seg.token);
+  return order.length === 3 ? order : undefined;
+}
+
+/**
+ * The calendar's expected date-segment order plus a concrete example from the current date — e.g.
+ * "day-month-year (e.g. 15-Grimvold-1089)". Undefined when the format order isn't available.
+ */
+function expectedStartFormat(api: CalendarApi): string | undefined {
+  try {
+    const cal = api.getObject();
+    const order = segmentOrder(cal.dateFormat);
+    if (!order) return undefined;
+    const current = api.getCurrentDate();
+    const value: Record<Segment, string> = {
+      Y: String(current.year),
+      M: cal.static.months[current.month]?.name ?? String(current.month + 1),
+      D: String(current.day),
+    };
+    const words = order.map((token) => SEGMENT_WORD[token]).join("-");
+    const example = order.map((token) => value[token]).join("-");
+    return `${words} (e.g. ${example})`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An error message when `start` is set for a Calendarium calendar but its written segments don't fit
+ * the calendar's format — a name in the year/day slot (wrong order) or an unknown month — which
+ * Calendarium would otherwise silently coerce into a different date. Validated directly against the
+ * calendar's segment order rather than round-tripping through `toDisplayDate` (whose output format
+ * may be spaces/ordinals, which don't re-parse). Undefined when there's no calendar/start,
+ * Calendarium is unavailable, or the value fits.
+ */
+export function startDateError(
+  calendar: string | undefined,
+  start: string | undefined,
+): string | undefined {
+  if (!calendar || !start) return undefined;
+  const api = getCalendarApi(calendar);
+  if (!api) return undefined;
+
+  try {
+    const parsed = parseStartDate(api, start);
+    const cal = api.getObject();
+    const order = segmentOrder(cal.dateFormat);
+    const segs = start.split(/[-–—]/).map((s) => s.trim());
+
+    if (parsed) {
+      // Can't position the segments (unknown order / not three) → trust that it parsed.
+      if (!order || segs.length !== 3) return undefined;
+      const seg = (token: Segment) => segs[order.indexOf(token)];
+      const isNumber = (s: string) => /^\d+$/.test(s);
+      const months = cal.static.months;
+      const monthFits = isNumber(seg("M"))
+        ? Number(seg("M")) >= 1 && Number(seg("M")) <= months.length
+        : months.some((m) => m.name?.toLowerCase().startsWith(seg("M").toLowerCase()));
+      if (isNumber(seg("Y")) && isNumber(seg("D")) && monthFits) return undefined;
+    }
+
+    const readAs = parsed ? ` — it reads as ${api.toDisplayDate(parsed, null, "D MMMM Y")}` : "";
+    const base = `Start date "${start}" doesn't match calendar "${calendar}"'s date format${readAs}.`;
+    const hint = expectedStartFormat(api);
+    return hint ? `${base} Expected ${hint}.` : `${base} Use the calendar's own dash-separated format.`;
+  } catch {
+    return undefined;
+  }
 }
 
 // Formats to try when serializing the current date to a `start`: the calendar's own default first
