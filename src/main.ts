@@ -33,6 +33,7 @@ import {
   toggleAt,
 } from "./actions";
 import { applyTrackerAction } from "./apply";
+import { rollDuration } from "./dice";
 import { BlockRange, findTrackerBlockAt } from "./block";
 import { fenceTrackerBlock } from "./serialize";
 import { seedTrackerState } from "./seed";
@@ -90,9 +91,9 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           new EffectModal(
             this.app,
             { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
-            (label, turns) => {
+            (label, turns, duration) => {
               void this.mutateFromWidget(el, ctx, addEffect(label, turns, startsAt));
-              this.recordEffect(label, turns);
+              this.recordEffect(label, duration);
             },
           ).open(),
         onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
@@ -162,25 +163,41 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   }
 
   /**
-   * The duration to pre-fill for a label, when it's unambiguous — the single duration it's always
-   * been used with, or a strict most-common one. Returns undefined when there's no clear winner.
+   * The duration expression to pre-fill for a label, when it's unambiguous — the single one it's
+   * always been used with, or a strict most-common one. May be dice (e.g. "2d6+1"), which re-rolls
+   * on submit. Returns undefined when there's no clear winner.
    */
-  private durationFor(label: string): number | undefined {
+  private durationFor(label: string): string | undefined {
     const durations = this.effectHistory[label]?.durations;
     if (!durations) return undefined;
     const ranked = Object.entries(durations).sort((a, b) => b[1] - a[1]);
     if (ranked.length === 0) return undefined;
     if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return undefined; // tie → not clear
-    return Number(ranked[0][0]);
+    return ranked[0][0];
   }
 
   /** Bump a label's usage so it surfaces higher in suggestions and learns its typical duration. */
-  private recordEffect(label: string, turns: number): void {
+  private recordEffect(label: string, duration: string): void {
     const stat = this.effectHistory[label] ?? { count: 0, durations: {} };
     stat.count += 1;
-    stat.durations[turns] = (stat.durations[turns] ?? 0) + 1;
+    stat.durations[duration] = (stat.durations[duration] ?? 0) + 1;
     this.effectHistory[label] = stat;
     void this.saveSettings();
+  }
+
+  /** Recorded custom-effect labels with their usage (most-used first), for the settings view. */
+  effectHistoryView(): { label: string; count: number; durations: [string, number][] }[] {
+    return this.frequentEffectLabels().map((label) => ({
+      label,
+      count: this.effectHistory[label].count,
+      durations: Object.entries(this.effectHistory[label].durations),
+    }));
+  }
+
+  /** Forget a recorded custom-effect label so it no longer suggests or pre-fills a duration. */
+  async forgetEffect(label: string): Promise<void> {
+    delete this.effectHistory[label];
+    await this.saveSettings();
   }
 
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
@@ -323,18 +340,19 @@ class NoteModal extends Modal {
   }
 }
 
-/** Usage stats for one custom effect label: how often, and with which durations. */
+/** Usage stats for one custom effect label: how often, and with which duration expressions. */
 interface EffectStat {
   /** Total uses. Stored (not derived from `durations`) so legacy entries migrated from the old
    *  count-only format keep their suggestion ranking despite having no recorded durations. */
   count: number;
+  /** Tally of the duration expressions used (plain numbers or dice like "2d6+1") → times seen. */
   durations: Record<string, number>;
 }
 
 /** What the Add-effect modal needs from history: ranked labels and a per-label duration hint. */
 interface EffectHistoryView {
   labels: string[];
-  durationFor: (label: string) => number | undefined;
+  durationFor: (label: string) => string | undefined;
 }
 
 /** Coerce persisted history to the current shape, migrating the legacy `label → count` form. */
@@ -381,12 +399,12 @@ class EffectLabelSuggest extends AbstractInputSuggest<string> {
 /** Prompts for an ad-hoc effect's label and duration, then invokes `onSubmit`. */
 class EffectModal extends Modal {
   private label = "";
-  private turns = "1";
+  private duration = "1";
 
   constructor(
     app: App,
     private readonly history: EffectHistoryView,
-    private readonly onSubmit: (label: string, turns: number) => void,
+    private readonly onSubmit: (label: string, turns: number, duration: string) => void,
   ) {
     super(app);
   }
@@ -400,10 +418,10 @@ class EffectModal extends Modal {
     // Pre-fill the duration for a known label, unless the user has already set one by hand.
     const fillDuration = (label: string) => {
       if (durationTouched) return;
-      const turns = this.history.durationFor(label);
-      if (turns === undefined) return;
-      this.turns = String(turns);
-      durationField.setValue(this.turns); // setValue doesn't fire onChange, so it stays "untouched"
+      const duration = this.history.durationFor(label);
+      if (duration === undefined) return;
+      this.duration = duration;
+      durationField.setValue(this.duration); // setValue doesn't fire onChange, so it stays "untouched"
     };
 
     new Setting(this.contentEl).setName("Label").addText((t) => {
@@ -419,12 +437,10 @@ class EffectModal extends Modal {
         suggest.close();
       });
     });
-    new Setting(this.contentEl).setName("Duration (turns)").addText((t) => {
+    new Setting(this.contentEl).setName("Duration").addText((t) => {
       durationField = t;
-      t.inputEl.type = "number";
-      t.inputEl.min = "1";
-      t.setValue(this.turns).onChange((v) => {
-        this.turns = v;
+      t.setPlaceholder("e.g. 6 or 2d6+1").setValue(this.duration).onChange((v) => {
+        this.duration = v;
         durationTouched = true;
       });
     });
@@ -438,12 +454,14 @@ class EffectModal extends Modal {
   }
 
   private submit(): void {
-    const turns = Number(this.turns);
-    if (!this.label || !Number.isInteger(turns) || turns < 1) {
-      new Notice("Enter a label and a whole number of turns ≥ 1.");
+    // Accept a plain number or dice (e.g. "2d6+1"); dice roll now, so the effect gets a fixed span.
+    const roll = rollDuration(this.duration);
+    if (!this.label || !roll || roll.total < 1) {
+      new Notice("Enter a label and a duration ≥ 1 turn — a number or dice like 2d6+1.");
       return;
     }
-    this.onSubmit(this.label, turns);
+    if (roll.rolled) new Notice(`Rolled ${roll.expr}: ${roll.total} turn(s).`);
+    this.onSubmit(this.label, roll.total, roll.expr);
     this.close();
   }
 }
@@ -483,33 +501,44 @@ class OsrSettingsTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Light presets").setHeading();
+    new Setting(containerEl).setName("Presets").setHeading();
 
     s.presets.forEach((preset, i) => {
-      new Setting(containerEl)
-        .addText((t) =>
-          t.setPlaceholder("Label").setValue(preset.label).onChange(async (v) => {
-            preset.label = v;
-            await this.plugin.saveSettings();
-          }),
-        )
-        .addText((t) => this.numberInput(t, 1, () => preset.turns, (n) => (preset.turns = n)))
-        .addToggle((t) =>
-          t
-            .setTooltip("Pausable")
-            .setValue(preset.pausable ?? false)
-            .onChange(async (v) => {
-              preset.pausable = v;
-              await this.plugin.saveSettings();
-            }),
-        )
-        .addExtraButton((b) =>
-          b.setIcon("trash").setTooltip("Remove").onClick(async () => {
-            s.presets.splice(i, 1);
-            await this.plugin.saveSettings();
-            this.display();
-          }),
-        );
+      const row = new Setting(containerEl);
+      row.settingEl.addClass("osr-tt-preset-row");
+      // Each field carries its own inline label, so the row reads on its own without a header row.
+      const label = (text: string) => row.controlEl.createSpan({ cls: "osr-tt-field-label", text });
+
+      label("Name");
+      row.addText((t) => {
+        t.inputEl.addClass("osr-tt-preset-label");
+        t.setValue(preset.label).onChange(async (v) => {
+          preset.label = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+      label("Turns");
+      row.addText((t) => {
+        t.inputEl.addClass("osr-tt-preset-turns");
+        this.numberInput(t, 1, () => preset.turns, (n) => (preset.turns = n));
+      });
+
+      label("Pausable");
+      row.addToggle((t) =>
+        t.setValue(preset.pausable ?? false).onChange(async (v) => {
+          preset.pausable = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+      row.addExtraButton((b) =>
+        b.setIcon("trash").setTooltip("Remove").onClick(async () => {
+          s.presets.splice(i, 1);
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      );
     });
 
     new Setting(containerEl).addButton((b) =>
@@ -524,6 +553,31 @@ class OsrSettingsTab extends PluginSettingTab {
         this.display();
       }),
     );
+
+    new Setting(containerEl)
+      .setName("Effect history")
+      .setDesc("Custom-effect labels learned for autocomplete and duration pre-fill.")
+      .setHeading();
+
+    const history = this.plugin.effectHistoryView();
+    if (history.length === 0) {
+      new Setting(containerEl).setDesc("No custom effects recorded yet.");
+    } else {
+      for (const entry of history) {
+        const durations = entry.durations
+          .map(([expr, count]) => (count > 1 ? `${expr} (×${count})` : expr))
+          .join(", ");
+        new Setting(containerEl)
+          .setName(entry.label)
+          .setDesc(`Used ${entry.count}× · ${durations}`)
+          .addExtraButton((b) =>
+            b.setIcon("trash").setTooltip("Forget").onClick(async () => {
+              await this.plugin.forgetEffect(entry.label);
+              this.display();
+            }),
+          );
+      }
+    }
   }
 
   /** Wire a text field as a whole-number input (≥ min) that persists valid values. */

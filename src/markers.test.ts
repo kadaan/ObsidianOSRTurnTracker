@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveMarker } from "./markers";
+import { markerEventAt, resolveMarker } from "./markers";
 
 describe("resolveMarker", () => {
   it("resolves an un-paused marker to a single active segment", () => {
@@ -89,5 +89,39 @@ describe("resolveMarker", () => {
     const r = resolveMarker({ startsAt: 0, duration: 6, pauses: [{ at: 3 }] }, 1);
 
     expect(r.phase).toBe("active");
+  });
+});
+
+describe("markerEventAt", () => {
+  const resolved = { startsAt: 10, expiresAt: 16, segments: [[10, 16]] as Array<[number, number]> };
+
+  it("reports a start on the first burning turn", () => {
+    expect(markerEventAt(resolved, 10)).toBe("start");
+  });
+
+  it("reports a stop on the final burning turn (expiresAt - 1)", () => {
+    expect(markerEventAt(resolved, 15)).toBe("stop");
+    expect(markerEventAt(resolved, 16)).toBeUndefined(); // expiresAt itself is already out
+  });
+
+  it("returns undefined for a turn mid-burn", () => {
+    expect(markerEventAt(resolved, 12)).toBeUndefined();
+  });
+
+  it("reports pause on the last turn before a pause and resume on the turn it continues", () => {
+    // paused at 3 (resumed at 10): segments [0,3) and [10,13), effective expiry 13.
+    const m = { startsAt: 0, expiresAt: 13, segments: [[0, 3], [10, 13]] as Array<[number, number]> };
+
+    expect(markerEventAt(m, 0)).toBe("start");
+    expect(markerEventAt(m, 2)).toBe("pause"); // last turn of the first segment, ends at a pause
+    expect(markerEventAt(m, 10)).toBe("resume"); // first turn of the second segment
+    expect(markerEventAt(m, 12)).toBe("stop"); // final burning turn (13 - 1)
+  });
+
+  it("reports pause (not stop) on the last turn of a still-open pause", () => {
+    // paused at 3, never resumed: only segment [0,3), projected expiry 6 (unreached).
+    const m = { startsAt: 0, expiresAt: 6, segments: [[0, 3]] as Array<[number, number]> };
+
+    expect(markerEventAt(m, 2)).toBe("pause");
   });
 });

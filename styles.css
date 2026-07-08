@@ -157,6 +157,30 @@ textarea.osr-tt-note-input {
   font-size: var(--font-ui-medium);
 }
 
+/* Preset rows carry no info label, so the control fills the row. Each field has its own inline
+   label (so the row is self-describing); the name input grows to fill the leftover space. */
+.osr-tt-preset-row .setting-item-info {
+  display: none;
+}
+
+.osr-tt-preset-row .setting-item-control {
+  flex: 1;
+  gap: 0.5em;
+}
+
+.osr-tt-preset-row input.osr-tt-preset-label {
+  flex: 1;
+}
+
+.osr-tt-preset-row input.osr-tt-preset-turns {
+  width: 4em;
+}
+
+.osr-tt-field-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
 /* Box highlighted by a selected effect row. */
 .osr-tt-box.is-highlit {
   outline: 2px solid var(--text-accent);

@@ -2,7 +2,7 @@ import { Menu, debounce, setIcon } from "obsidian";
 import { LightPreset, TrackerState } from "./model";
 import { computeGrid, DayNote } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
-import { MarkerPhase, inSegments } from "./markers";
+import { MarkerEvent, MarkerPhase, inSegments, markerEventAt } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
 
@@ -137,11 +137,41 @@ export function renderTracker(
   const dayHeaderFn = dayHeader ?? makeDayHeader(state);
 
   const panel = computeEffectPanel(state, settings.presets);
-  // Effects whose active burn covers a turn, labelled for that turn's tooltip. Kept split by
-  // panel group so a not-yet-started effect reads "Upcoming", not "Active", and pause gaps
-  // (excluded from `segments`) don't falsely claim a turn.
-  const spanningNames = (rows: EffectRow[], turn: number) =>
+  // Markers that have started (every phase but upcoming) — the ones whose start/stop/pause/resume
+  // transitions are drawn on the grid and named in a box's tooltip.
+  const startedRows = [...panel.active, ...panel.paused, ...panel.expired];
+
+  /** Display labels of the rows whose active burn spans `turn`. */
+  const spanningLabels = (rows: EffectRow[], turn: number) =>
     rows.filter((r) => inSegments(r.segments, turn)).map((r) => r.label);
+
+  // Tooltip for a box: name each timeline event on this turn (start/stop/pause/resume), then any
+  // marker merely active or upcoming here. A marker with an event on this turn isn't also listed
+  // under "Active". Lines are newline-separated so each reads on its own row.
+  const boxTooltip = (turn: number): string => {
+    const events: Record<MarkerEvent, string[]> = { start: [], stop: [], pause: [], resume: [] };
+    for (const row of startedRows) {
+      const event = markerEventAt(row, turn);
+      if (event) events[event].push(row.label);
+    }
+    const active = spanningLabels(
+      panel.active.filter((r) => !markerEventAt(r, turn)),
+      turn,
+    );
+    const upcoming = spanningLabels(panel.upcoming, turn);
+
+    const lines: string[] = [];
+    const line = (label: string, names: string[]) => {
+      if (names.length) lines.push(`${label}: ${names.join(", ")}`);
+    };
+    line("Start", events.start);
+    line("Stop", events.stop);
+    line("Pause", events.pause);
+    line("Resume", events.resume);
+    line("Active", active);
+    line("Upcoming", upcoming);
+    return lines.join("\n");
+  };
 
   // Box click → jump to that turn; right-click → add a preset or custom marker starting on it.
   if (handlers) {
@@ -200,12 +230,8 @@ export function renderTracker(
           // it clears once the ending turn is in the past (the effect is finished).
           text: box.endingCount > 0 && box.status !== "past" ? String(box.endingCount) : "",
         });
-        const active = spanningNames(panel.active, box.turn);
-        const upcoming = spanningNames(panel.upcoming, box.turn);
-        const parts: string[] = [];
-        if (active.length) parts.push(`Active: ${active.join(", ")}`);
-        if (upcoming.length) parts.push(`Upcoming: ${upcoming.join(", ")}`);
-        if (parts.length) boxEl.setAttribute("title", parts.join(" · "));
+        const title = boxTooltip(box.turn);
+        if (title) boxEl.setAttribute("title", title);
       }
     }
 
@@ -301,10 +327,9 @@ function renderPanel(
   const renderRow = (container: HTMLElement, row: EffectRow, phase: MarkerPhase) => {
     const rowEl = container.createDiv({ cls: "osr-tt-effect" });
     dimRows.push({ el: rowEl, segments: row.segments });
-    rowEl.setAttribute(
-      "title",
-      `${formatSpan(row.startsAt, row.expiresAt, dayHeader)} · ${row.remaining} turn(s) left`,
-    );
+    // A paused marker's span is frozen, so the start→expiry range is misleading — say "Paused".
+    const span = phase === "paused" ? "Paused" : formatSpan(row.startsAt, row.expiresAt, dayHeader);
+    rowEl.setAttribute("title", `${span} · ${row.remaining} turn(s) left`);
 
     const nameEl = rowEl.createSpan({ cls: "osr-tt-effect-name", text: row.label });
     if (handlers) {

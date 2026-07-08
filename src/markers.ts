@@ -66,3 +66,24 @@ export function resolveMarker(
 /** Whether `turn` falls inside any active burn segment `[from, to)`. */
 export const inSegments = (segments: Array<[number, number]>, turn: number): boolean =>
   segments.some(([from, to]) => from <= turn && turn < to);
+
+/** A notable transition a marker undergoes on a single turn. */
+export type MarkerEvent = "start" | "stop" | "pause" | "resume";
+
+/**
+ * The event a marker undergoes on `turn`, if any. Every event lands on an active (spanned) box:
+ * it "starts" on its first burning turn and "resumes" on the first turn of a later segment;
+ * it "pauses" on the last burning turn before a pause and "stops" on its final burning turn
+ * (`expiresAt - 1`). Returns undefined when nothing notable happens on `turn`. On a one-turn
+ * segment both boundaries fall on the same turn; the start/resume side wins.
+ */
+export function markerEventAt(
+  m: { startsAt: number; expiresAt: number; segments: Array<[number, number]> },
+  turn: number,
+): MarkerEvent | undefined {
+  for (const [from, to] of m.segments) {
+    if (from === turn) return from === m.startsAt ? "start" : "resume";
+    if (to - 1 === turn) return to === m.expiresAt ? "stop" : "pause";
+  }
+  return undefined;
+}
