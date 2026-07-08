@@ -54,7 +54,14 @@ import {
   TrackerState,
   dayOf,
 } from "./model";
-import { isCalendariumAvailable, makeFantasyDayHeader, setCalendariumCurrentDate } from "./calendarium";
+import {
+  calendarError,
+  calendarNames,
+  currentDateAsStart,
+  isCalendariumAvailable,
+  makeFantasyDayHeader,
+  setCalendariumCurrentDate,
+} from "./calendarium";
 import { createDefaultSettings, OsrTurnTrackerSettings } from "./settings";
 
 export default class OsrTurnTrackerPlugin extends Plugin {
@@ -96,6 +103,18 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       if (!result.ok) {
         renderError(el, result.error);
         return;
+      }
+      // A typo'd calendar name should fail loudly, not silently fall back to Day-N.
+      const calErr = calendarError(result.state.calendar);
+      if (calErr) {
+        renderError(el, calErr);
+        return;
+      }
+      // A block with a fantasy calendar but no start can't sync dates. Anchor it to Calendarium's
+      // current date once, writing it back to the block (the re-render then picks up the start).
+      if (result.state.calendar && !result.state.start) {
+        const start = currentDateAsStart(result.state.calendar);
+        if (start) this.backfillStart(el, ctx, start);
       }
       // Own any markdown render-children on a child scoped to this block, so they unload when the
       // block re-renders. Passing the plugin as owner would leak them until the plugin unloads.
@@ -176,7 +195,14 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         const frontmatter = file
           ? this.app.metadataCache.getFileCache(file)?.frontmatter
           : undefined;
-        editor.replaceSelection(`${fenceTrackerBlock(seedTrackerState(frontmatter))}\n`);
+        const state = seedTrackerState(frontmatter);
+        // With a fantasy calendar but no explicit start, anchor the tracker to Calendarium's current
+        // date so day-headers and date-sync work out of the box.
+        if (state.calendar && !state.start) {
+          const start = currentDateAsStart(state.calendar);
+          if (start) state.start = start;
+        }
+        editor.replaceSelection(`${fenceTrackerBlock(state)}\n`);
       },
     });
 
@@ -238,20 +264,38 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     await this.saveSettings();
   }
 
+  /** Locate the file + block range for a rendered widget. `info.text`/line numbers are a consistent
+   *  snapshot from getSectionInfo; undefined when the block can't be resolved (e.g. transient render). */
+  private locateBlock(
+    el: HTMLElement,
+    ctx: MarkdownPostProcessorContext,
+  ): { file: TFile; text: string; range: BlockRange } | undefined {
+    const info = ctx.getSectionInfo(el);
+    const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+    if (!info || !(file instanceof TFile)) return undefined;
+    return { file, text: info.text, range: { lineStart: info.lineStart, lineEnd: info.lineEnd } };
+  }
+
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
   private async mutateFromWidget(
     el: HTMLElement,
     ctx: MarkdownPostProcessorContext,
     transform: Transform,
   ): Promise<void> {
-    const info = ctx.getSectionInfo(el);
-    const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-    if (!info || !(file instanceof TFile)) {
+    const located = this.locateBlock(el, ctx);
+    if (!located) {
       new Notice("Could not locate the tracker block.");
       return;
     }
-    // info.text and its line numbers are a consistent snapshot taken at click time.
-    await this.applyToFile(file, info.text, { lineStart: info.lineStart, lineEnd: info.lineEnd }, transform);
+    await this.applyToFile(located.file, located.text, located.range, transform);
+  }
+
+  /** Write a resolved `start` back into a block that has none. Quiet (runs during render): if the
+   *  block can't be located this pass, we simply try again on the next render. */
+  private backfillStart(el: HTMLElement, ctx: MarkdownPostProcessorContext, start: string): void {
+    const located = this.locateBlock(el, ctx);
+    if (!located) return;
+    void this.applyToFile(located.file, located.text, located.range, (s) => (s.start ? s : { ...s, start }));
   }
 
   /** Write path for the command: block located relative to the editor cursor. */
@@ -342,6 +386,8 @@ function sectionFor(key: string): Section {
 
 const FENCE_LINE = /^`{3,}/;
 const TYPE_VALUE_RE = /^\s*(?:-\s*)?type:\s*(\S*)$/;
+// The `calendar:` value can contain spaces (e.g. "Calendar of Greyhawk"), so capture the whole rest.
+const CALENDAR_VALUE_RE = /^calendar:\s*(.*)$/;
 // An optional indent, an optional list dash, a partial word. A line with a colon never matches, so a
 // completed `key:` doesn't re-trigger (and neither does mid-sentence prose).
 const STRUCTURE_RE = /^(\s*)(-\s*)?([A-Za-z]*)$/;
@@ -349,11 +395,12 @@ const STRUCTURE_RE = /^(\s*)(-\s*)?([A-Za-z]*)$/;
 /**
  * Autocomplete while hand-editing a `turn-tracker` fence — the one place the interactive widget
  * isn't shown. It is section-aware: top-level keys at column 0, a `- type:`/`- at:` scaffold and
- * entry keys inside `effects:`/`notes:`, and the preset ids (plus `custom`) on a `type:` value.
+ * entry keys inside `effects:`/`notes:`, the preset ids (plus `custom`) on a `type:` value, and the
+ * installed Calendarium calendars on a `calendar:` value.
  */
 class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
   // Context captured in onTrigger, consumed in getSuggestions.
-  private mode: "value" | "structure" = "structure";
+  private mode: "type" | "calendar" | "structure" = "structure";
   private section: Section = "top";
   private indented = false;
   private hasDash = false;
@@ -367,17 +414,18 @@ class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
 
   onTrigger(cursor: EditorPosition, editor: Editor): EditorSuggestTriggerInfo | null {
     const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-    // Cheap per-line rejection before the buffer scan: only a `type:` value or a key/list anchor.
+    // Cheap per-line rejection before the buffer scan: a `type:`/`calendar:` value or a key/list anchor.
     const typeMatch = before.match(TYPE_VALUE_RE);
-    const structMatch = typeMatch ? null : before.match(STRUCTURE_RE);
-    if (!typeMatch && !structMatch) return null;
+    const calendarMatch = typeMatch ? null : before.match(CALENDAR_VALUE_RE);
+    const structMatch = typeMatch || calendarMatch ? null : before.match(STRUCTURE_RE);
+    if (!typeMatch && !calendarMatch && !structMatch) return null;
 
     const { inside, section } = this.scanUp(editor, cursor.line);
     if (!inside) return null;
 
-    if (typeMatch) {
-      this.mode = "value";
-      const value = typeMatch[1];
+    if (typeMatch || calendarMatch) {
+      this.mode = typeMatch ? "type" : "calendar";
+      const value = (typeMatch ?? calendarMatch)![1];
       return { start: { line: cursor.line, ch: cursor.ch - value.length }, end: cursor, query: value };
     }
 
@@ -394,8 +442,9 @@ class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
 
   getSuggestions(context: EditorSuggestContext): TrackerSuggestion[] {
     const q = context.query.toLowerCase();
-    if (this.mode === "value") {
-      // Trailing space terminates the value so the same trigger doesn't immediately re-fire.
+    // Both value modes append a trailing space to terminate the value, so selecting it doesn't
+    // immediately re-fire the same trigger and leave the popup stuck open.
+    if (this.mode === "type") {
       return [...this.plugin.settings.presets.map((p) => p.id), CUSTOM_TYPE]
         .filter((id) => id.toLowerCase().startsWith(q))
         .map((id) => ({
@@ -403,6 +452,11 @@ class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
           hint: id === CUSTOM_TYPE ? "free-text effect" : "preset",
           insert: `${id} `,
         }));
+    }
+    if (this.mode === "calendar") {
+      return calendarNames()
+        .filter((name) => name.toLowerCase().startsWith(q))
+        .map((name) => ({ display: name, hint: "calendar", insert: `${name} ` }));
     }
 
     const out: TrackerSuggestion[] = [];

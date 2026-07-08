@@ -62,7 +62,10 @@ position: 0
 ````
 
 When inserted into a note that has a `startTime` and/or `fc-calendar` frontmatter field,
-those seed the block's `start` and `calendar`. Then use the widget:
+those seed the block's `start` and `calendar`. Whenever a block has a `calendar` but no `start`
+(whether seeded from frontmatter or typed into the block), the tracker fills `start` from
+Calendarium's current date on first render — anchoring it to "today" so date-sync works
+immediately. Then use the widget:
 
 - **End Turn / +Xh** — advance time. The caret next to a button opens the other options.
 - **Torch / Lantern / Custom…** — add a marker starting now. "Custom…" prompts for a label
@@ -147,9 +150,13 @@ The plugin's settings tab configures defaults shared by every tracker in the vau
 
 ## Calendarium (optional)
 
-If a block has a `calendar` and the Calendarium plugin is installed, day headers render your
-fantasy weekday, day, month, and year. If Calendarium is missing, the tracker still works and
-falls back to `Day N` with a one-time notice.
+If a block has a `calendar` and the Calendarium plugin is installed, day headers show the fantasy
+weekday and date (e.g. `Sunning, 14 Grimvold 1089`). The date is formatted by Calendarium itself,
+and the weekday is read from Calendarium's own per-month data so it matches Calendarium exactly
+(older builds without that data simply omit the weekday). If Calendarium is missing, the tracker
+still works and falls back to `Day N` with a one-time notice. If Calendarium *is* installed but the
+`calendar` name doesn't match one of its calendars, the block shows an error listing the available
+names (rather than silently falling back).
 
 ## Development
 

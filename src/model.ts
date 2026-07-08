@@ -47,6 +47,9 @@ export const TURNS_PER_DAY = TURNS_PER_HOUR * HOURS_PER_DAY; // 144
 /** The 0-based day index a turn falls in. */
 export const dayOf = (turn: number): number => Math.floor(turn / TURNS_PER_DAY);
 
+/** Positive modulo: `value` wrapped into `[0, size)` even when `value` is negative. */
+export const wrap = (value: number, size: number): number => ((value % size) + size) % size;
+
 /**
  * Upper bound on `position`, guarding against a hand-entered value that would
  * render millions of boxes and freeze the renderer. A year of in-game time is a

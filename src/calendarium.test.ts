@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeFantasyDayHeader, setCalendariumCurrentDate } from "./calendarium";
+import {
+  calendarError,
+  calendarNames,
+  currentDateAsStart,
+  makeFantasyDayHeader,
+  setCalendariumCurrentDate,
+} from "./calendarium";
 import { TrackerState } from "./model";
 
 const stateWith = (calendar?: string): TrackerState => ({ calendar, position: 0, markers: [] });
@@ -10,6 +16,25 @@ function stubCalendarium(value: unknown): void {
 
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
+});
+
+// Stand-in for Calendarium's own toDisplayDate — enough to verify which CalDate we hand it.
+const MONTHS = ["Fireseek", "Readying"];
+const displayDate = (d: { day: number; month: number; year: number }): string =>
+  `${d.day} ${MONTHS[d.month]} ${d.year}`;
+
+// A minimal Svelte-style readable store (synchronous value emit, no-op unsubscribe).
+const readable = <T>(value: T) => ({
+  subscribe: (run: (v: T) => void) => {
+    run(value);
+    return () => {};
+  },
+});
+
+/** A per-month store like Calendarium's: fixed weekday names + the weekday index of the month's day 1. */
+const monthStore = (weekdays: string[], firstDay: number) => () => ({
+  weekdays: readable(weekdays),
+  firstDay: readable(firstDay),
 });
 
 describe("makeFantasyDayHeader", () => {
@@ -27,43 +52,46 @@ describe("makeFantasyDayHeader", () => {
     expect(warned).toBe(true);
   });
 
-  it("formats a fantasy date from the Calendarium API", () => {
+  it("prefixes the weekday from the month store and formats the date via toDisplayDate", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
-        getStore: () => ({ getDaysBeforeDate: () => 1 }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
+        getStore: () => ({ getMonthStoreForDate: monthStore(["Sul", "Mol"], 1) }),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
-    const header = makeFantasyDayHeader(stateWith("Greyhawk"), () => {});
-    expect(header?.(0)).toBe("Mol, 1 Fireseek 591"); // weekday idx (0+1)%2 = 1 → "Mol"
+    // firstDay 1, day 1 → weekday index wrap(1 + 0, 2) = 1 → "Mol".
+    expect(makeFantasyDayHeader(stateWith("Greyhawk"), () => {})?.(0)).toBe("Mol, 1 Fireseek 591");
+  });
+
+  it("derives the weekday from the month's firstDay plus the day offset (the Dolmenwood case)", () => {
+    const dolmenwood = ["Colly", "Chime", "Hayme", "Moot", "Fireday", "Eggfast", "Sunning"];
+    stubCalendarium({
+      getAPI: () => ({
+        getObject: () => ({ static: { months: [{ length: 30 }] } }),
+        // Grimvold's day 1 is Colly (firstDay 0); day 14 → wrap(0 + 13, 7) = 6 → "Sunning",
+        // matching Calendarium (the old total-days-before formula reported Eggfast here).
+        getStore: () => ({ getMonthStoreForDate: monthStore(dolmenwood, 0) }),
+        getCurrentDate: () => ({ day: 1, month: 0, year: 1089 }),
+        toDisplayDate: (d: { day: number; month: number; year: number }) =>
+          `${d.day} Grimvold ${d.year}`,
+        parseDate: () => ({ day: 14, month: 0, year: 1089 }),
+      }),
+    });
+
+    const state: TrackerState = { calendar: "Dolmenwood", start: "1089-Grimvold-14", position: 0, markers: [] };
+    expect(makeFantasyDayHeader(state, () => {})?.(0)).toBe("Sunning, 14 Grimvold 1089");
   });
 
   it("advances by the calendar's own month lengths, not Gregorian months", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol", "Wen"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
-        getStore: () => ({ getDaysBeforeDate: () => 0 }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
+        getStore: () => ({ getMonthStoreForDate: monthStore(["Sul", "Mol", "Wen"], 0) }),
         getCurrentDate: () => ({ day: 27, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
@@ -74,81 +102,59 @@ describe("makeFantasyDayHeader", () => {
   it("advances via Calendarium's getOffsetDate when available (leap-accurate)", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol", "Wen"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
         getStore: () => ({
-          getDaysBeforeDate: () => 0,
           // A sentinel result the plain-month-length fallback could never produce.
           getOffsetDate: () => ({ day: 10, month: 1, year: 700 }),
+          getMonthStoreForDate: monthStore(["Sul", "Mol", "Wen"], 0),
         }),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
+    // day 10 → wrap(0 + 9, 3) = 0 → "Sul".
     expect(makeFantasyDayHeader(stateWith("Greyhawk"), () => {})?.(3)).toBe("Sul, 10 Readying 700");
   });
 
   it("hands a dash-segmented start to Calendarium's parseDate", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
-        getStore: () => ({ getDaysBeforeDate: () => 1 }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
+        getStore: () => ({ getMonthStoreForDate: monthStore(["Sul", "Mol"], 1) }),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
         parseDate: () => ({ day: 5, month: 1, year: 600 }), // Calendarium resolves the format order
+        toDisplayDate: displayDate,
       }),
     });
 
+    // day 5 → wrap(1 + 4, 2) = 1 → "Mol".
     const state: TrackerState = { calendar: "Greyhawk", start: "600-Readying-5", position: 0, markers: [] };
     expect(makeFantasyDayHeader(state, () => {})?.(0)).toBe("Mol, 5 Readying 600");
   });
 
-  it("falls back to interpreting an ISO start when parseDate is unavailable", () => {
+  it("omits the weekday when the month store is unavailable (older Calendarium)", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
-        getStore: () => ({ getDaysBeforeDate: () => 1 }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
+        getStore: () => ({}), // no getMonthStoreForDate
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
-    // No parseDate on this API → "0600-02-05" is read as day 5 of the 2nd month, year 600.
-    const state: TrackerState = { calendar: "Greyhawk", start: "0600-02-05T08:00", position: 0, markers: [] };
-    expect(makeFantasyDayHeader(state, () => {})?.(0)).toBe("Mol, 5 Readying 600");
+    expect(makeFantasyDayHeader(stateWith("Greyhawk"), () => {})?.(0)).toBe("1 Fireseek 591");
   });
 
   it("degrades a per-day formatting failure to 'Day N' instead of throwing", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({ static: { firstWeekDay: 0, weekdays: [], months: [] } }), // empty → nameOf(undefined) throws
-        getStore: () => ({ getDaysBeforeDate: () => 0 }),
+        getObject: () => ({ static: { months: [] } }),
+        getStore: () => ({}),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
-        getDate: (day: number, month: number, year: number) => ({ day, month, year }),
+        toDisplayDate: () => {
+          throw new Error("boom");
+        },
       }),
     });
 
@@ -157,29 +163,102 @@ describe("makeFantasyDayHeader", () => {
   });
 });
 
+describe("calendarNames", () => {
+  it("returns Calendarium's calendar list", () => {
+    stubCalendarium({ getAPI: () => ({}), getCalendars: () => ["Dolmenwood", "Greyhawk"] });
+    expect(calendarNames()).toEqual(["Dolmenwood", "Greyhawk"]);
+  });
+
+  it("returns an empty list when Calendarium is absent or can't list", () => {
+    stubCalendarium(undefined);
+    expect(calendarNames()).toEqual([]);
+    stubCalendarium({ getAPI: () => ({}) }); // no getCalendars
+    expect(calendarNames()).toEqual([]);
+  });
+});
+
+describe("calendarError", () => {
+  it("returns undefined for no calendar", () => {
+    expect(calendarError(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when Calendarium isn't installed (soft fallback)", () => {
+    stubCalendarium(undefined);
+    expect(calendarError("Dolmenwood")).toBeUndefined();
+  });
+
+  it("returns undefined when the calendar name is known", () => {
+    stubCalendarium({ getAPI: () => ({}), getCalendars: () => ["Dolmenwood", "Greyhawk"] });
+    expect(calendarError("Dolmenwood")).toBeUndefined();
+  });
+
+  it("returns an error naming the available calendars when the name is unknown", () => {
+    stubCalendarium({ getAPI: () => ({}), getCalendars: () => ["Dolmenwood", "Greyhawk"] });
+    const error = calendarError("Dolmnwood");
+    expect(error).toContain("Dolmnwood");
+    expect(error).toContain("Dolmenwood, Greyhawk");
+  });
+
+  it("returns undefined when Calendarium is too old to list calendars", () => {
+    stubCalendarium({ getAPI: () => ({}) }); // no getCalendars
+    expect(calendarError("Dolmenwood")).toBeUndefined();
+  });
+});
+
+describe("currentDateAsStart", () => {
+  it("serializes Calendarium's current date to a start string that parses back to it", () => {
+    stubCalendarium({
+      getAPI: () => ({
+        getObject: () => ({ static: { months: [] } }),
+        getStore: () => ({}),
+        getCurrentDate: () => ({ day: 14, month: 0, year: 1089 }),
+        // Default format is unparseable here; the "Y-M-D" candidate is the one that round-trips.
+        toDisplayDate: (d: { day: number; month: number; year: number }, _e: unknown, fmt?: string) =>
+          fmt === "Y-M-D" ? `${d.year}-${d.month + 1}-${d.day}` : "the 14th of Grimvold",
+        parseDate: (s: string) => {
+          const [y, m, day] = s.split("-").map(Number);
+          return { day, month: m - 1, year: y };
+        },
+      }),
+    });
+
+    expect(currentDateAsStart("Dolmenwood")).toBe("1089-1-14");
+  });
+
+  it("returns undefined when Calendarium is unavailable", () => {
+    stubCalendarium(undefined);
+    expect(currentDateAsStart("Dolmenwood")).toBeUndefined();
+  });
+
+  it("returns undefined when no format round-trips (never writes an unreadable start)", () => {
+    stubCalendarium({
+      getAPI: () => ({
+        getObject: () => ({ static: { months: [] } }),
+        getStore: () => ({}),
+        getCurrentDate: () => ({ day: 14, month: 0, year: 1089 }),
+        toDisplayDate: () => "not a parseable date",
+        parseDate: () => null,
+      }),
+    });
+
+    expect(currentDateAsStart("Dolmenwood")).toBeUndefined();
+  });
+});
+
 describe("setCalendariumCurrentDate", () => {
   it("sets Calendarium's current date to the tracker's current day when a start is set", () => {
     let saved: unknown;
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({
-          static: {
-            firstWeekDay: 0,
-            weekdays: ["Sul", "Mol"],
-            months: [
-              { name: "Fireseek", length: 28 },
-              { name: "Readying", length: 28 },
-            ],
-          },
-        }),
+        getObject: () => ({ static: { months: [{ length: 28 }, { length: 28 }] } }),
         getStore: () => ({
-          getDaysBeforeDate: () => 0,
           getOffsetDate: (_base: unknown, offset: number) => ({ day: offset, month: 1, year: 602 }),
           setCurrentDate: (d: unknown) => {
             saved = d;
           },
         }),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
@@ -192,14 +271,14 @@ describe("setCalendariumCurrentDate", () => {
     let called = false;
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({ static: { firstWeekDay: 0, weekdays: ["Sul"], months: [{ name: "Fireseek", length: 28 }] } }),
+        getObject: () => ({ static: { months: [{ length: 28 }] } }),
         getStore: () => ({
-          getDaysBeforeDate: () => 0,
           setCurrentDate: () => {
             called = true;
           },
         }),
         getCurrentDate: () => ({ day: 1, month: 0, year: 591 }),
+        toDisplayDate: displayDate,
       }),
     });
 
