@@ -18,6 +18,13 @@
   flex: 1 1 auto;
 }
 
+/* Quiet hotkey hint trailing a button's label (only shown when a hotkey is assigned). */
+.osr-tt-hotkey {
+  margin-left: 0.5em;
+  font-size: 0.75em;
+  color: var(--text-faint);
+}
+
 /* Split button: "End Turn" (primary) joined to a caret that opens the +Xh advances. */
 .osr-tt-split {
   display: flex;

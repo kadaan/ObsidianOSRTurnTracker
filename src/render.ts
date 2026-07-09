@@ -1,4 +1,5 @@
 import { Menu, debounce, setIcon } from "obsidian";
+import { commandIds } from "./commands";
 import { LightPreset, PRESET_FALLBACK_ICON, TrackerState } from "./model";
 import { computeGrid, DayNote } from "./grid";
 import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
@@ -74,6 +75,8 @@ export interface TrackerHandlers {
   onAddNote: (at?: number) => void;
   onEditNote: (index: number, text: string) => void;
   onDeleteNote: (index: number) => void;
+  /** The hotkey a user assigned to a command id (or undefined), shown quietly on its button. */
+  hotkey?: (commandId: string) => string | undefined;
 }
 
 /**
@@ -433,45 +436,72 @@ function renderControls(
   settings: OsrTurnTrackerSettings,
 ): void {
   const controls = root.createDiv({ cls: "osr-tt-controls" });
-  const addButton = (text: string, onClick: () => void) =>
-    controls.createEl("button", { cls: "osr-tt-btn", text }).addEventListener("click", onClick);
+  const hintFor = (commandId?: string) => (commandId ? handlers.hotkey?.(commandId) : undefined);
+
+  // Fill a button with its label and, when the command has an assigned hotkey, a quiet trailing hint.
+  const fillButton = (btn: HTMLButtonElement, text: string, commandId?: string) => {
+    btn.createSpan({ text });
+    const hint = hintFor(commandId);
+    if (!hint) return;
+    btn.createSpan({ cls: "osr-tt-hotkey", text: hint });
+    btn.setAttribute("aria-label", `${text} (${hint})`);
+  };
+
+  const addButton = (text: string, onClick: () => void, commandId?: string) => {
+    const btn = controls.createEl("button", { cls: "osr-tt-btn" });
+    fillButton(btn, text, commandId);
+    btn.addEventListener("click", onClick);
+  };
 
   // A primary button joined to a caret that opens `items` as a menu.
-  const addSplitButton = (text: string, onClick: () => void, items: MenuItemSpec[]) => {
+  const addSplitButton = (text: string, onClick: () => void, items: MenuItemSpec[], commandId?: string) => {
     const split = controls.createDiv({ cls: "osr-tt-split" });
-    split
-      .createEl("button", { cls: "osr-tt-btn osr-tt-split-main", text })
-      .addEventListener("click", onClick);
+    const main = split.createEl("button", { cls: "osr-tt-btn osr-tt-split-main" });
+    fillButton(main, text, commandId);
+    main.addEventListener("click", onClick);
     const caret = split.createEl("button", { cls: "osr-tt-btn osr-tt-split-caret", attr: { "aria-label": "More…" } });
     setIcon(caret, "chevron-down");
     caret.addEventListener("click", (evt) => openMenu(evt, items));
   };
 
+  // A menu item with its command's hotkey (when set) appended to the label, as Obsidian's menus do.
+  const withHotkey = (item: MenuItemSpec, commandId: string): MenuItemSpec => {
+    const hint = hintFor(commandId);
+    return hint ? { ...item, title: `${item.title} (${hint})` } : item;
+  };
+
   // End Turn is the primary action; the caret advances by whole hours.
-  const advances = settings.advanceShortcuts.map((hours) => ({
-    title: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
-    onClick: () => handlers.onAdvanceHours(hours),
-  }));
-  if (advances.length === 0) addButton("End Turn", handlers.onEndTurn);
-  else addSplitButton("End Turn", handlers.onEndTurn, advances);
+  const advances = settings.advanceShortcuts.map((hours) =>
+    withHotkey(
+      { title: `Advance ${hours} hour${hours === 1 ? "" : "s"}`, onClick: () => handlers.onAdvanceHours(hours) },
+      commandIds.advance(hours),
+    ),
+  );
+  if (advances.length === 0) addButton("End Turn", handlers.onEndTurn, commandIds.endTurn);
+  else addSplitButton("End Turn", handlers.onEndTurn, advances, commandIds.endTurn);
 
   // Add-marker split button: primary lights the first preset, the caret nests the rest + Custom.
-  const custom = customItem(handlers);
+  const custom = withHotkey(customItem(handlers), commandIds.addEffect);
   if (settings.presets.length === 0) {
-    addButton(custom.title, custom.onClick);
+    addButton(custom.title, custom.onClick, commandIds.addEffect);
   } else {
     const [firstPreset, ...restPresets] = settings.presets;
-    addSplitButton(firstPreset.label, () => handlers.onLight(firstPreset.id), [
-      ...restPresets.map((p) => presetItem(handlers, p)),
-      custom,
-    ]);
+    addSplitButton(
+      firstPreset.label,
+      () => handlers.onLight(firstPreset.id),
+      [...restPresets.map((p) => withHotkey(presetItem(handlers, p), commandIds.light(p.id))), custom],
+      commandIds.light(firstPreset.id),
+    );
   }
 
-  addButton("Note", () => handlers.onAddNote());
+  addButton("Note", () => handlers.onAddNote(), commandIds.addNote);
 
-  addSplitButton("Clear expired", handlers.onClearExpired, [
-    { title: "Clear all", onClick: handlers.onClearAll },
-  ]);
+  addSplitButton(
+    "Clear expired",
+    handlers.onClearExpired,
+    [withHotkey({ title: "Clear all", onClick: handlers.onClearAll }, commandIds.clearAll)],
+    commandIds.clearExpired,
+  );
 }
 
 /** Render a parse/validation error inline, keeping the note responsive. */

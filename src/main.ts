@@ -7,12 +7,15 @@ import {
   EditorSuggest,
   EditorSuggestContext,
   EditorSuggestTriggerInfo,
+  Hotkey,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownRenderer,
   MarkdownView,
   Modal,
+  Modifier,
   Notice,
+  Platform,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -20,6 +23,7 @@ import {
   TextComponent,
   TFile,
 } from "obsidian";
+import { commandIds } from "./commands";
 import { parseTrackerState } from "./parse";
 import { renderError, renderTracker } from "./render";
 import {
@@ -72,6 +76,36 @@ import {
   DEFAULT_START_PROPERTY,
   OsrTurnTrackerSettings,
 } from "./settings";
+
+/** The slice of Obsidian's (untyped) hotkey manager we read to show a command's assigned hotkey. */
+interface HotkeyManager {
+  getHotkeys?(commandId: string): Hotkey[] | undefined;
+  customKeys?: Record<string, Hotkey[]>;
+}
+
+/** A modifier's symbol/word, platform-appropriate (⌘⌥⇧⌃ on macOS, words elsewhere). */
+const modifierLabel = (modifier: Modifier): string => {
+  const mac = Platform.isMacOS;
+  switch (modifier) {
+    case "Mod":
+      return mac ? "⌘" : "Ctrl";
+    case "Meta":
+      return mac ? "⌘" : "Win";
+    case "Ctrl":
+      return mac ? "⌃" : "Ctrl";
+    case "Alt":
+      return mac ? "⌥" : "Alt";
+    case "Shift":
+      return mac ? "⇧" : "Shift";
+  }
+};
+
+/** Render a hotkey the way Obsidian's own UI does: glued symbols on macOS (⌘⇧E), `+`-joined elsewhere. */
+function formatHotkey(hotkey: Hotkey): string {
+  const key = hotkey.key.length === 1 ? hotkey.key.toUpperCase() : hotkey.key;
+  const parts = [...(hotkey.modifiers ?? []).map(modifierLabel), key];
+  return Platform.isMacOS ? parts.join("") : parts.join("+");
+}
 
 export default class OsrTurnTrackerPlugin extends Plugin {
   settings: OsrTurnTrackerSettings = createDefaultSettings();
@@ -172,12 +206,13 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           new ConfirmModal(this.app, "Delete this note?", () =>
             void this.mutateFromWidget(el, ctx, removeNote(index)),
           ).open(),
+        hotkey: (commandId) => this.hotkeyLabel(commandId),
       }, makeFantasyDayHeader(state, () => this.warnCalendar()),
       (host, text) => void MarkdownRenderer.render(this.app, text, host, ctx.sourcePath, renderChild));
     });
 
     this.addCommand({
-      id: "end-turn",
+      id: commandIds.endTurn,
       name: "End turn",
       editorCallback: (editor) => void this.mutateFromEditor(editor, endTurn),
     });
@@ -185,33 +220,33 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     // Registered from settings at load; changing the list takes effect on reload.
     for (const hours of this.settings.advanceShortcuts) {
       this.addCommand({
-        id: `advance-${hours}h`,
+        id: commandIds.advance(hours),
         name: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
         editorCallback: (editor) => void this.mutateFromEditor(editor, advanceHours(hours)),
       });
     }
 
     this.addCommand({
-      id: "clear-expired",
+      id: commandIds.clearExpired,
       name: "Clear expired markers",
       editorCallback: (editor) => void this.mutateFromEditor(editor, clearExpired),
     });
 
     this.addCommand({
-      id: "clear-all",
+      id: commandIds.clearAll,
       name: "Clear all markers",
       editorCallback: (editor) => void this.mutateFromEditor(editor, clearAll),
     });
 
     this.addCommand({
-      id: "add-note",
+      id: commandIds.addNote,
       name: "Add note",
       editorCallback: (editor) =>
         this.openNoteModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
     });
 
     this.addCommand({
-      id: "add-effect",
+      id: commandIds.addEffect,
       name: "Add effect",
       editorCallback: (editor) =>
         this.openEffectModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
@@ -220,7 +255,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     // One command per light preset, like the advance shortcuts above (read from settings at load).
     for (const preset of this.settings.presets) {
       this.addCommand({
-        id: `light-${preset.id}`,
+        id: commandIds.light(preset.id),
         name: `Light: ${preset.label}`,
         editorCallback: (editor) => {
           const transform = this.lightTransform(preset.id);
@@ -348,6 +383,16 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         this.recordEffect(label, duration);
       },
     ).open();
+  }
+
+  /** The formatted hotkey a user has assigned to `commandId` (relative to this plugin), or undefined
+   *  when none is set — shown quietly on the matching widget button. Reads Obsidian's (untyped) hotkey
+   *  manager defensively, so a future API change just hides the hint rather than breaking rendering. */
+  private hotkeyLabel(commandId: string): string | undefined {
+    const manager = (this.app as unknown as { hotkeyManager?: HotkeyManager }).hotkeyManager;
+    const fullId = `${this.manifest.id}:${commandId}`;
+    const hotkeys = manager?.getHotkeys?.(fullId) ?? manager?.customKeys?.[fullId];
+    return hotkeys?.length ? formatHotkey(hotkeys[0]) : undefined;
   }
 
   private async mutateFromWidget(
