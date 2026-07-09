@@ -39,6 +39,24 @@ const monthStore = (weekdays: string[], firstDay: number) => () => ({
   firstDay: readable(firstDay),
 });
 
+// A Dolmenwood-like calendar: Calendarium parses dates year-first (year-monthName-day) regardless of
+// display format — resolving the month by numeric index or name prefix (unknown → 0), and coercing a
+// non-numeric day/year to NaN. Shared by the startDateError and currentDateAsStart specs.
+const DOLMENWOOD_MONTHS = [
+  { name: "Grimvold", length: 28 },
+  { name: "Lymewald", length: 28 },
+];
+const yearFirstParse =
+  (months: { name: string }[]) =>
+  (s: string): { year: number; month: number; day: number } => {
+    const [y, m, d] = s.split("-");
+    const num = (x: string | undefined) => (/^\d+$/.test(x ?? "") ? Number(x) : NaN);
+    const month = /^\d+$/.test(m ?? "")
+      ? Number(m) - 1
+      : Math.max(0, months.findIndex((mm) => mm.name.toLowerCase().startsWith((m ?? "").toLowerCase())));
+    return { year: num(y), month, day: num(d) };
+  };
+
 describe("makeFantasyDayHeader", () => {
   it("returns undefined and doesn't warn when no calendar is set", () => {
     let warned = false;
@@ -148,6 +166,38 @@ describe("makeFantasyDayHeader", () => {
     expect(makeFantasyDayHeader(stateWith("Greyhawk"), () => {})?.(0)).toBe("1 Fireseek 591");
   });
 
+  it("labels a leap/feast day by its Calendarium name, and a plain day by its weekday", () => {
+    const dolmenwood = ["Colly", "Chime", "Hayme", "Moot", "Fireday", "Eggfast", "Sunning"];
+    stubCalendarium({
+      getAPI: () => ({
+        getObject: () => ({ static: { months: [{ name: "Grimvold", length: 28 }] } }),
+        getStore: () => ({
+          getOffsetDate: (_d: unknown, offset: number) => ({ day: 28 + offset, month: 0, year: 1089 }),
+          getMonthStoreForDate: () => ({
+            weekdays: readable(dolmenwood),
+            firstDay: readable(0),
+            // Grimvold's two same-`after` feasts: Calendarium names only the first (day 29); day 30
+            // is a plain day (name null) — the "mirror Calendarium" behavior we chose.
+            daysAsWeeks: readable([
+              [
+                { number: 28, name: null },
+                { number: 29, name: "Hanglemas" },
+                { number: 30, name: null },
+              ],
+            ]),
+          }),
+        }),
+        getCurrentDate: () => ({ day: 1, month: 0, year: 1089 }),
+        toDisplayDate: (d: { day: number; month: number; year: number }) => `${d.day} Grimvold ${d.year}`,
+      }),
+    });
+
+    const header = makeFantasyDayHeader(stateWith("Dolmenwood"), () => {});
+    expect(header?.(0)).toBe("Sunning, 28 Grimvold 1089"); // day 28: plain day → weekday
+    expect(header?.(1)).toBe("Hanglemas, 29 Grimvold 1089"); // day 29: feast → its own name
+    expect(header?.(2)).toBe("Chime, 30 Grimvold 1089"); // day 30: unnamed feast → falls back to weekday
+  });
+
   it("degrades a per-day formatting failure to 'Day N' instead of throwing", () => {
     stubCalendarium({
       getAPI: () => ({
@@ -226,78 +276,71 @@ describe("calendarError", () => {
 });
 
 describe("startDateError", () => {
-  // A tiny day-month-year calendar: parse assigns segments positionally (like Calendarium's
-  // formatDigest), coercing non-numeric day/year to 1 and wrapping the month — so a wrong-order
-  // value parses into a valid-but-different date. Format is the inverse: `<day>-<MonthName>-<year>`.
-  const MONTHS = ["Grimvold", "Lymewald"];
-  const dmyCalendar = {
+  const MONTHS = DOLMENWOOD_MONTHS;
+  // Dolmenwood: Calendarium *parses* year-first even though it *displays* day-first (DD-MM-YYYY).
+  const yearFirst = {
     getAPI: () => ({
-      getObject: () => ({ name: "Dolmenwood", dateFormat: "D-MMMM-Y", static: { months: MONTHS.map((name) => ({ name })) } }),
+      getObject: () => ({ name: "Dolmenwood", dateFormat: "DD-MM-YYYY", static: { months: MONTHS } }),
       getStore: () => ({}),
       getCurrentDate: () => ({ day: 15, month: 0, year: 1089 }),
-      parseDate: (s: string) => {
-        const [d, m, y] = s.split("-");
-        const num = (x: string | undefined, fallback: number) => (/^\d+$/.test(x ?? "") ? Number(x) : fallback);
-        const monthIdx = /^\d+$/.test(m ?? "")
-          ? Number(m) - 1
-          : MONTHS.findIndex((n) => n.toLowerCase() === (m ?? "").toLowerCase());
-        return { day: num(d, 1), month: ((monthIdx % MONTHS.length) + MONTHS.length) % MONTHS.length, year: num(y, 1) };
-      },
-      toDisplayDate: (dte: { day: number; month: number; year: number }) => `${dte.day}-${MONTHS[dte.month]}-${dte.year}`,
+      parseDate: yearFirstParse(MONTHS),
+      toDisplayDate: (dte: { day: number; month: number; year: number }) => `${dte.day}-${dte.month + 1}-${dte.year}`,
     }),
     getCalendars: () => ["Dolmenwood"],
   };
 
-  it("returns undefined when each segment fits its slot (correct order, padding/number aside)", () => {
-    stubCalendarium(dmyCalendar);
-    expect(startDateError("Dolmenwood", "2-Grimvold-1089")).toBeUndefined();
-    expect(startDateError("Dolmenwood", "02-Grimvold-1089")).toBeUndefined();
-    expect(startDateError("Dolmenwood", "2-1-1089")).toBeUndefined(); // numeric month in range
+  it("accepts a start written in the calendar's own (year-first) parse order", () => {
+    stubCalendarium(yearFirst);
+    expect(startDateError("Dolmenwood", "1089-Grimvold-28")).toBeUndefined();
+    expect(startDateError("Dolmenwood", "1089-Grimvold-15")).toBeUndefined();
+    expect(startDateError("Dolmenwood", "1089-1-28")).toBeUndefined(); // numeric month in range
   });
 
-  it("errors when a name lands in a numeric slot (wrong segment order)", () => {
-    stubCalendarium(dmyCalendar);
-    const error = startDateError("Dolmenwood", "Grimvold-1089-2");
-    expect(error).toContain("Grimvold-1089-2"); // the offending value
+  it("errors on a day-first start that transposes day and year into the wrong slots", () => {
+    stubCalendarium(yearFirst);
+    // "28-Grimvold-1089" parsed year-first → year 28, day 1089 (Grimvold has only 28 days).
+    const error = startDateError("Dolmenwood", "28-Grimvold-1089");
+    expect(error).toContain("28-Grimvold-1089"); // the offending value
     expect(error).toContain("Dolmenwood");
-    expect(error).toContain("day-month-year"); // order derived from dateFormat
-    expect(error).toContain("15-Grimvold-1089"); // example from the current date
+    expect(error).toContain("day 1089"); // where the value actually landed
+    expect(error).toContain("year 28");
+    expect(error).toContain("year-month-day"); // hint uses the real parse order, not the display order
+    expect(error).toContain("1089-Grimvold-15"); // round-trip-safe example from the current date
   });
 
-  it("errors when the month name isn't a real month (Calendarium would silently default it)", () => {
-    stubCalendarium(dmyCalendar);
-    const error = startDateError("Dolmenwood", "2-AAAGrimvold-1089");
-    expect(error).toContain("2-AAAGrimvold-1089");
-    expect(error).toContain("day-month-year");
+  it("errors when the month name isn't a real month (Calendarium would silently default it to 0)", () => {
+    stubCalendarium(yearFirst);
+    const error = startDateError("Dolmenwood", "1089-AAAGrimvold-28");
+    expect(error).toContain("1089-AAAGrimvold-28");
+    expect(error).toContain("year-month-day");
   });
 
-  it("returns undefined without a calendar, without a start, or when Calendarium is absent", () => {
-    stubCalendarium(dmyCalendar);
-    expect(startDateError(undefined, "Grimvold-1089-2")).toBeUndefined();
+  it("returns undefined without a calendar, without a start, or when the parser is absent", () => {
+    stubCalendarium(yearFirst);
+    expect(startDateError(undefined, "28-Grimvold-1089")).toBeUndefined();
     expect(startDateError("Dolmenwood", undefined)).toBeUndefined();
     stubCalendarium(undefined);
-    expect(startDateError("Dolmenwood", "Grimvold-1089-2")).toBeUndefined();
+    expect(startDateError("Dolmenwood", "28-Grimvold-1089")).toBeUndefined();
+    // getAPI present but no parseDate (older Calendarium) → can't validate, so don't block.
+    stubCalendarium({ getAPI: () => ({ getObject: () => ({ static: { months: MONTHS } }) }) });
+    expect(startDateError("Dolmenwood", "28-Grimvold-1089")).toBeUndefined();
   });
 });
 
 describe("currentDateAsStart", () => {
-  it("serializes Calendarium's current date to a start string that parses back to it", () => {
+  const MONTHS = DOLMENWOOD_MONTHS;
+
+  it("serializes the current date in the calendar's own parse order, using the month name", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({ static: { months: [] } }),
+        getObject: () => ({ static: { months: MONTHS } }),
         getStore: () => ({}),
         getCurrentDate: () => ({ day: 14, month: 0, year: 1089 }),
-        // Default format is unparseable here; the "Y-M-D" candidate is the one that round-trips.
-        toDisplayDate: (d: { day: number; month: number; year: number }, _e: unknown, fmt?: string) =>
-          fmt === "Y-M-D" ? `${d.year}-${d.month + 1}-${d.day}` : "the 14th of Grimvold",
-        parseDate: (s: string) => {
-          const [y, m, day] = s.split("-").map(Number);
-          return { day, month: m - 1, year: y };
-        },
+        parseDate: yearFirstParse(MONTHS),
       }),
     });
 
-    expect(currentDateAsStart("Dolmenwood")).toBe("1089-1-14");
+    expect(currentDateAsStart("Dolmenwood")).toBe("1089-Grimvold-14");
   });
 
   it("returns undefined when Calendarium is unavailable", () => {
@@ -305,14 +348,13 @@ describe("currentDateAsStart", () => {
     expect(currentDateAsStart("Dolmenwood")).toBeUndefined();
   });
 
-  it("returns undefined when no format round-trips (never writes an unreadable start)", () => {
+  it("returns undefined when no order round-trips (never writes an unreadable start)", () => {
     stubCalendarium({
       getAPI: () => ({
-        getObject: () => ({ static: { months: [] } }),
+        getObject: () => ({ static: { months: MONTHS } }),
         getStore: () => ({}),
         getCurrentDate: () => ({ day: 14, month: 0, year: 1089 }),
-        toDisplayDate: () => "not a parseable date",
-        parseDate: () => null,
+        parseDate: () => null, // nothing parses → no order discoverable
       }),
     });
 

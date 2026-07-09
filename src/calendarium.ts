@@ -28,10 +28,19 @@ function readStore<T>(store: Readable<T>): T {
   return value;
 }
 
-/** Calendarium's per-month store: this month's weekday names and the weekday index its day 1 lands on. */
+/** One slot in Calendarium's month layout: a regular day (name null) or a named leap/feast day. */
+interface DayEntry {
+  number: number;
+  name: string | null;
+}
+
+/** Calendarium's per-month store: weekday names, the weekday its day 1 lands on, and the laid-out
+ *  weeks (each a row of day slots) from which leap/feast days carry their own name. */
 interface MonthStore {
   weekdays: Readable<NamedEntry[]>;
   firstDay: Readable<number>;
+  /** Weeks of day slots (nulls pad the first/last week); absent on older builds. */
+  daysAsWeeks?: Readable<(DayEntry | null)[][]>;
 }
 
 /** The subset of Calendarium's per-calendar API this plugin relies on (soft dependency). */
@@ -131,24 +140,39 @@ function dateForDay(
   return store.getOffsetDate ? store.getOffsetDate(base, dayIndex) : addDays(base, dayIndex, months);
 }
 
-/** A month's weekday names and the weekday index its day 1 lands on. */
+/** A month's weekday names, the weekday its day 1 lands on, and the name of each leap/feast day keyed
+ *  by its day number (so a named day is labelled by its feast name instead of a computed weekday). */
 interface MonthWeek {
   weekdays: NamedEntry[];
   firstDay: number;
+  leapNames: Map<number, string>;
 }
 
 /**
  * The weekday layout of `date`'s month, from Calendarium's own per-month store so it matches
  * Calendarium exactly. The store's `firstDay` (weekday of the month's day 1) already accounts for
  * overflow, offset, leap and intercalary days — which a naive "total days before % weekday count"
- * gets wrong. Undefined on older Calendarium builds that don't expose the month store.
+ * gets wrong. Leap/feast day names are read from Calendarium's own laid-out weeks (so we label a day
+ * exactly as Calendarium does, including its handling of stacked feasts). Undefined on older
+ * Calendarium builds that don't expose the month store.
  */
 function monthWeek(store: ReturnType<CalendarApi["getStore"]>, date: CalDate): MonthWeek | undefined {
   if (!store.getMonthStoreForDate) return undefined;
   const month = store.getMonthStoreForDate(date);
   const weekdays = readStore(month.weekdays);
   if (!weekdays?.length) return undefined;
-  return { weekdays, firstDay: readStore(month.firstDay) };
+
+  const leapNames = new Map<number, string>();
+  if (month.daysAsWeeks) {
+    for (const week of readStore(month.daysAsWeeks)) {
+      for (const slot of week) {
+        if (!slot) continue;
+        const name = nonEmptyString(slot.name);
+        if (name) leapNames.set(slot.number, name);
+      }
+    }
+  }
+  return { weekdays, firstDay: readStore(month.firstDay), leapNames };
 }
 
 /** Whether the Calendarium plugin is present and exposing its global API. */
@@ -193,52 +217,46 @@ export function calendarError(calendar: string | undefined): string | undefined 
   return `Unknown Calendarium calendar "${calendar}". Available: ${list}.`;
 }
 
-const SEGMENT_WORD = { Y: "year", M: "month", D: "day" } as const;
-type Segment = keyof typeof SEGMENT_WORD;
+const sameDate = (a: CalDate, b: CalDate): boolean =>
+  a.day === b.day && a.month === b.month && a.year === b.year;
 
-/** The Y/M/D segment order Calendarium parses/formats in, read from the calendar's `dateFormat` (the
- *  position of the first Y, M, D token). Undefined when the format is absent or lacks all three. */
-function segmentOrder(dateFormat: string | undefined): Segment[] | undefined {
-  if (!dateFormat) return undefined;
-  const fmt = dateFormat.toUpperCase();
-  const order = (["Y", "M", "D"] as const)
-    .map((token) => ({ token, at: fmt.indexOf(token) }))
-    .filter((seg) => seg.at >= 0)
-    .sort((a, b) => a.at - b.at)
-    .map((seg) => seg.token);
-  return order.length === 3 ? order : undefined;
+const monthName = (months: MonthEntry[], index: number): string =>
+  nonEmptyString(months[index]?.name) ?? String(index + 1);
+
+// Calendarium's parser always reads a date year-first: `year-monthName-day` (or `year-numMonth-day`),
+// regardless of the calendar's *display* format. So we always write starts in that one order.
+const START_FORMAT_HINT = "year-month-day";
+
+/** Serialize a date as `year-monthName-day` — Calendarium's parse order — using the month *name* so
+ *  the month slot is unambiguous (a name can't be mistaken for a numeric day/year). */
+const serializeStart = (date: CalDate, months: MonthEntry[]): string =>
+  `${date.year}-${monthName(months, date.month)}-${date.day}`;
+
+/** Whether a parsed date sits within the calendar's bounds: a real month, and a day within that
+ *  month's length (when known). Catches a transposed start whose day/year landed in the wrong slot
+ *  (e.g. day 1089 in a 28-day month) — which parses "successfully" but is nonsense. */
+function dateInRange(date: CalDate, months: MonthEntry[]): boolean {
+  if (date.month < 0 || date.month >= months.length || date.day < 1) return false;
+  const length = months[date.month]?.length;
+  return typeof length !== "number" || date.day <= length;
+}
+
+/** Whether `start` has a non-numeric segment that doesn't name a real month — a bad month name that
+ *  Calendarium would silently coerce (to month 0), so `dateInRange` alone wouldn't catch it. */
+function hasUnknownMonthSegment(start: string, months: MonthEntry[]): boolean {
+  const names = months.map((m) => nonEmptyString(m.name)?.toLowerCase()).filter(Boolean) as string[];
+  return start
+    .split(/[-–—]/)
+    .map((s) => s.trim())
+    .some((s) => !/^\d+$/.test(s) && !names.some((name) => name.startsWith(s.toLowerCase())));
 }
 
 /**
- * The calendar's expected date-segment order plus a concrete example from the current date — e.g.
- * "day-month-year (e.g. 15-Grimvold-1089)". Undefined when the format order isn't available.
- */
-function expectedStartFormat(api: CalendarApi): string | undefined {
-  try {
-    const cal = api.getObject();
-    const order = segmentOrder(cal.dateFormat);
-    if (!order) return undefined;
-    const current = api.getCurrentDate();
-    const value: Record<Segment, string> = {
-      Y: String(current.year),
-      M: cal.static.months[current.month]?.name ?? String(current.month + 1),
-      D: String(current.day),
-    };
-    const words = order.map((token) => SEGMENT_WORD[token]).join("-");
-    const example = order.map((token) => value[token]).join("-");
-    return `${words} (e.g. ${example})`;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * An error message when `start` is set for a Calendarium calendar but its written segments don't fit
- * the calendar's format — a name in the year/day slot (wrong order) or an unknown month — which
- * Calendarium would otherwise silently coerce into a different date. Validated directly against the
- * calendar's segment order rather than round-tripping through `toDisplayDate` (whose output format
- * may be spaces/ordinals, which don't re-parse). Undefined when there's no calendar/start,
- * Calendarium is unavailable, or the value fits.
+ * An error message when `start` is set but doesn't parse to a real date for `calendar` — either it's
+ * unparseable, or (the subtle case) it was written in the wrong order (e.g. day-first) so that
+ * Calendarium's year-first parser lands day/year in the wrong slots and reads a nonsense date like
+ * day 1089. We validate the parsed result's ranges rather than the raw segments, since a wrong order
+ * still "parses." Undefined when there's no calendar/start, the parser is unavailable, or it's valid.
  */
 export function startDateError(
   calendar: string | undefined,
@@ -246,58 +264,47 @@ export function startDateError(
 ): string | undefined {
   if (!calendar || !start) return undefined;
   const api = getCalendarApi(calendar);
-  if (!api) return undefined;
+  if (!api?.parseDate) return undefined; // can't validate without the parser → don't block
 
   try {
+    const months = api.getObject().static.months;
     const parsed = parseStartDate(api, start);
-    const cal = api.getObject();
-    const order = segmentOrder(cal.dateFormat);
-    const segs = start.split(/[-–—]/).map((s) => s.trim());
+    const badMonth = !!parsed && hasUnknownMonthSegment(start, months);
+    if (parsed && !badMonth && dateInRange(parsed, months)) return undefined;
 
-    if (parsed) {
-      // Can't position the segments (unknown order / not three) → trust that it parsed.
-      if (!order || segs.length !== 3) return undefined;
-      const seg = (token: Segment) => segs[order.indexOf(token)];
-      const isNumber = (s: string) => /^\d+$/.test(s);
-      const months = cal.static.months;
-      const monthFits = isNumber(seg("M"))
-        ? Number(seg("M")) >= 1 && Number(seg("M")) <= months.length
-        : months.some((m) => m.name?.toLowerCase().startsWith(seg("M").toLowerCase()));
-      if (isNumber(seg("Y")) && isNumber(seg("D")) && monthFits) return undefined;
-    }
-
-    const readAs = parsed ? ` — it reads as ${api.toDisplayDate(parsed, null, "D MMMM Y")}` : "";
-    const base = `Start date "${start}" doesn't match calendar "${calendar}"'s date format${readAs}.`;
-    const hint = expectedStartFormat(api);
-    return hint ? `${base} Expected ${hint}.` : `${base} Use the calendar's own dash-separated format.`;
+    // A bad month name means the segments themselves are wrong, so "reads as" would just repeat the
+    // silent default — only report the parsed reading when the month resolved but the date is out of range.
+    const readsAs =
+      parsed && !badMonth
+        ? ` — it reads as day ${parsed.day} of ${monthName(months, parsed.month)}, year ${parsed.year}`
+        : "";
+    const example = serializeStart(api.getCurrentDate(), months);
+    return (
+      `Start date "${start}" isn't a valid date for calendar "${calendar}"${readsAs}.` +
+      ` Expected ${START_FORMAT_HINT} (e.g. ${example}).`
+    );
   } catch {
     return undefined;
   }
 }
 
-// Formats to try when serializing the current date to a `start`: the calendar's own default first
-// (usually the nicest), then explicit dash orders as fallbacks.
-const START_FORMAT_CANDIDATES: (string | undefined)[] = [undefined, "Y-M-D", "D-M-Y", "M-D-Y"];
-
 /**
  * A `start` string seeded from Calendarium's current date for `calendar`, so a freshly-inserted
- * tracker is anchored to "today" and day-sync works without the user typing a date. Undefined when
- * Calendarium is unavailable. Each candidate format is kept only if it parses back to the same date,
- * so we never write a `start` the fantasy header can't read.
+ * tracker is anchored to "today" and day-sync works without the user typing a date. Written in
+ * Calendarium's year-first parse order (with the month name), then confirmed to parse back to the
+ * same date, so we never write a `start` the fantasy header can't read. Undefined when Calendarium
+ * is unavailable or the round-trip fails.
  */
 export function currentDateAsStart(calendar: string): string | undefined {
   const api = getCalendarApi(calendar);
-  if (!api) return undefined;
+  if (!api?.parseDate) return undefined;
 
   try {
     const current = api.getCurrentDate();
-    for (const format of START_FORMAT_CANDIDATES) {
-      const start = api.toDisplayDate(current, null, format);
-      const parsed = parseStartDate(api, start);
-      if (parsed && parsed.day === current.day && parsed.month === current.month && parsed.year === current.year) {
-        return start;
-      }
-    }
+    const months = api.getObject().static.months;
+    const start = serializeStart(current, months);
+    const parsed = parseStartDate(api, start);
+    if (parsed && sameDate(parsed, current)) return start;
   } catch {
     /* fall through: leave start unset */
   }
@@ -309,8 +316,9 @@ export function currentDateAsStart(calendar: string): string | undefined {
  * plugin is available; otherwise call `onWarn` and return undefined so the grid falls back to
  * real-date / Day-N. Days advance via Calendarium's own date arithmetic (leap/intercalary aware),
  * falling back to plain month lengths on older builds. The date is formatted by Calendarium's own
- * `toDisplayDate` (which honors the calendar's configured format but has no weekday token), and the
- * weekday is prefixed from Calendarium's per-month store (`weekdayName`) so it matches Calendarium.
+ * `toDisplayDate` (which honors the calendar's configured format but has no weekday token), and a
+ * label is prefixed from Calendarium's per-month store — a leap/feast day's own name when Calendarium
+ * gives it one, otherwise the weekday — so it matches Calendarium.
  * Never throws: a formatting failure at render degrades to "Day N".
  */
 export function makeFantasyDayHeader(
@@ -333,26 +341,33 @@ export function makeFantasyDayHeader(
     // The grid renders every day sequentially, so the month layout repeats ~30× per month; cache it
     // per year-month to avoid re-fetching Calendarium's month store for each day.
     const monthCache = new Map<string, MonthWeek | undefined>();
-    const weekdayFor = (cd: CalDate): string | undefined => {
+    // The day's label prefix: a leap/feast day's own name when Calendarium gives it one, otherwise
+    // the computed weekday. `firstDay` (day 1's weekday) + offset lands normal days on the right day.
+    const labelFor = (cd: CalDate): string | undefined => {
       const key = `${cd.year}-${cd.month}`;
       if (!monthCache.has(key)) monthCache.set(key, monthWeek(store, cd));
       const info = monthCache.get(key);
-      return info && nameOf(info.weekdays[wrap(info.firstDay + (cd.day - 1), info.weekdays.length)]);
+      if (!info) return undefined;
+      return (
+        info.leapNames.get(cd.day) ??
+        nameOf(info.weekdays[wrap(info.firstDay + (cd.day - 1), info.weekdays.length)])
+      );
     };
 
     return (dayIndex) => {
       try {
         const cd = dateForDay(store, base, dayIndex, months);
-        // Explicit day/month-name/year format; toDisplayDate's default is a bare numeric
-        // "year-month-day" (e.g. "600-14-21"). Tokens: D = day, MMMM = full month name, Y = full year.
-        const date = api.toDisplayDate(cd, null, "D MMMM Y");
-        let weekday: string | undefined;
+        // No format override: let Calendarium render the date in the user's own calendar format, so
+        // the header matches Calendarium everywhere. The `dateFormat` argument is honored only on
+        // newer builds, so passing one would make the header order depend on the installed version.
+        const date = api.toDisplayDate(cd, null);
+        let label: string | undefined;
         try {
-          weekday = weekdayFor(cd);
+          label = labelFor(cd);
         } catch {
-          /* weekday is best-effort; a failure there still leaves the date */
+          /* label is best-effort; a failure there still leaves the date */
         }
-        return weekday ? `${weekday}, ${date}` : date;
+        return label ? `${label}, ${date}` : date;
       } catch {
         return `Day ${dayIndex + 1}`;
       }
