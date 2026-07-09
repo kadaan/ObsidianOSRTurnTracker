@@ -1,7 +1,7 @@
 {
   "id": "osr-turn-tracker",
   "name": "OSR Turn Tracker",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "minAppVersion": "1.4.0",
   "description": "A simple OSR dungeon turn tracker: track exploration turns, light sources, and timed effects.",
   "author": "Joel Baranick",

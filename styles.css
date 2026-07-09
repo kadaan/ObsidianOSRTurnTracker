@@ -138,7 +138,13 @@
 textarea.osr-tt-note-input {
   width: 100%;
   resize: vertical;
+  margin-bottom: 0.25em;
+}
+
+.osr-tt-note-help {
   margin-bottom: 0.75em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
 }
 
 /* Add-effect modal: fixed-width label column + equal-width, roomier inputs on both rows. */

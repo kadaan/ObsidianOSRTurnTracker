@@ -144,26 +144,11 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
         onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
         onLight: (presetId, startsAt) => {
-          const preset = this.settings.presets.find((p) => p.id === presetId);
-          if (!preset) return;
-          // Roll the preset's duration expression now, so the marker gets a fixed span.
-          const roll = rollDuration(preset.turns);
-          if (!roll || roll.total < 1) {
-            new Notice(`"${preset.label}" has an invalid duration (${preset.turns}).`);
-            return;
-          }
-          if (roll.rolled) new Notice(`${preset.label} — rolled ${roll.expr}: ${roll.total} turn(s).`);
-          void this.mutateFromWidget(el, ctx, lightSource(presetId, roll.total, startsAt));
+          const transform = this.lightTransform(presetId, startsAt);
+          if (transform) void this.mutateFromWidget(el, ctx, transform);
         },
         onAddEffect: (startsAt) =>
-          new EffectModal(
-            this.app,
-            { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
-            (label, turns, duration) => {
-              void this.mutateFromWidget(el, ctx, addEffect(label, turns, startsAt));
-              this.recordEffect(label, duration);
-            },
-          ).open(),
+          this.openEffectModal(startsAt, (transform) => void this.mutateFromWidget(el, ctx, transform)),
         onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
         onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
         onRemoveMarker: (index, label) =>
@@ -178,7 +163,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
           void this.mutateFromWidget(el, ctx, setRemaining(index, turns)),
         onCopyState: () => void this.copyState(state),
         onAddNote: (at) =>
-          new NoteModal(this.app, "", (text) => void this.mutateFromWidget(el, ctx, addNote(text, at))).open(),
+          this.openNoteModal(at, (transform) => void this.mutateFromWidget(el, ctx, transform)),
         onEditNote: (index, text) =>
           new NoteModal(this.app, text, (next) =>
             void this.mutateFromWidget(el, ctx, editNote(index, next)),
@@ -203,6 +188,44 @@ export default class OsrTurnTrackerPlugin extends Plugin {
         id: `advance-${hours}h`,
         name: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
         editorCallback: (editor) => void this.mutateFromEditor(editor, advanceHours(hours)),
+      });
+    }
+
+    this.addCommand({
+      id: "clear-expired",
+      name: "Clear expired markers",
+      editorCallback: (editor) => void this.mutateFromEditor(editor, clearExpired),
+    });
+
+    this.addCommand({
+      id: "clear-all",
+      name: "Clear all markers",
+      editorCallback: (editor) => void this.mutateFromEditor(editor, clearAll),
+    });
+
+    this.addCommand({
+      id: "add-note",
+      name: "Add note",
+      editorCallback: (editor) =>
+        this.openNoteModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
+    });
+
+    this.addCommand({
+      id: "add-effect",
+      name: "Add effect",
+      editorCallback: (editor) =>
+        this.openEffectModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
+    });
+
+    // One command per light preset, like the advance shortcuts above (read from settings at load).
+    for (const preset of this.settings.presets) {
+      this.addCommand({
+        id: `light-${preset.id}`,
+        name: `Light: ${preset.label}`,
+        editorCallback: (editor) => {
+          const transform = this.lightTransform(preset.id);
+          if (transform) void this.mutateFromEditor(editor, transform);
+        },
       });
     }
 
@@ -293,6 +316,40 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   }
 
   /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
+  /** Roll a preset's duration and build the transform that lights it, or return undefined (after a
+   *  notice) when the duration is invalid. Shared by the widget button and the light hotkey command. */
+  private lightTransform(presetId: string, startsAt?: number): Transform | undefined {
+    const preset = this.settings.presets.find((p) => p.id === presetId);
+    if (!preset) return undefined;
+    // Roll the preset's duration expression now, so the marker gets a fixed span.
+    const roll = rollDuration(preset.turns);
+    if (!roll || roll.total < 1) {
+      new Notice(`"${preset.label}" has an invalid duration (${preset.turns}).`);
+      return undefined;
+    }
+    if (roll.rolled) new Notice(`${preset.label} — rolled ${roll.expr}: ${roll.total} turn(s).`);
+    return lightSource(presetId, roll.total, startsAt);
+  }
+
+  /** Open the "add note" modal, committing the resulting transform via `commit` (from the widget or
+   *  the editor command). `at` is the anchored turn, or undefined for the current turn. */
+  private openNoteModal(at: number | undefined, commit: (transform: Transform) => void): void {
+    new NoteModal(this.app, "", (text) => commit(addNote(text, at))).open();
+  }
+
+  /** Open the "add effect" modal, committing the resulting transform via `commit` and recording the
+   *  effect for autocomplete. Shared by the widget button and the effect hotkey command. */
+  private openEffectModal(startsAt: number | undefined, commit: (transform: Transform) => void): void {
+    new EffectModal(
+      this.app,
+      { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
+      (label, turns, duration) => {
+        commit(addEffect(label, turns, startsAt));
+        this.recordEffect(label, duration);
+      },
+    ).open();
+  }
+
   private async mutateFromWidget(
     el: HTMLElement,
     ctx: MarkdownPostProcessorContext,
@@ -635,6 +692,7 @@ class ConfirmModal extends Modal {
 /** Prompts for a note's free-form text (empty = new note, otherwise editing), then invokes `onSubmit`. */
 class NoteModal extends Modal {
   private text: string;
+  private saveButton?: ButtonComponent;
 
   constructor(
     app: App,
@@ -650,10 +708,21 @@ class NoteModal extends Modal {
     const input = this.contentEl.createEl("textarea", { cls: "osr-tt-note-input" });
     input.rows = 4;
     input.value = this.text;
-    input.addEventListener("input", () => (this.text = input.value));
-    new Setting(this.contentEl).addButton((b) =>
-      b.setButtonText("Save").setCta().onClick(() => this.submit()),
-    );
+    input.addEventListener("input", () => {
+      this.text = input.value;
+      this.refresh();
+    });
+    this.contentEl.createEl("div", { text: "Markdown is supported.", cls: "osr-tt-note-help" });
+    new Setting(this.contentEl).addButton((b) => {
+      this.saveButton = b;
+      b.setButtonText("Save").setCta().onClick(() => this.submit());
+    });
+    // Cmd/Ctrl+Enter saves (plain Enter inserts a newline in the textarea); no-op when empty.
+    this.scope.register(["Mod"], "Enter", () => {
+      if (this.canSubmit()) this.submit();
+      return false;
+    });
+    this.refresh();
     input.focus();
   }
 
@@ -661,13 +730,18 @@ class NoteModal extends Modal {
     this.contentEl.empty();
   }
 
+  /** Save is enabled only once the trimmed text is non-empty. */
+  private canSubmit(): boolean {
+    return this.text.trim().length > 0;
+  }
+
+  private refresh(): void {
+    this.saveButton?.setDisabled(!this.canSubmit());
+  }
+
   private submit(): void {
-    const text = this.text.trim();
-    if (!text) {
-      new Notice("Enter some text.");
-      return;
-    }
-    this.onSubmit(text);
+    if (!this.canSubmit()) return;
+    this.onSubmit(this.text.trim());
     this.close();
   }
 }
@@ -788,6 +862,12 @@ class EffectModal extends Modal {
       b.setButtonText("Add").setCta().onClick(() => this.submit());
     });
 
+    // Cmd/Ctrl+Enter adds, matching the Add button's enabled state.
+    this.scope.register(["Mod"], "Enter", () => {
+      if (this.canSubmit()) this.submit();
+      return false;
+    });
+
     this.refresh();
   }
 
@@ -795,9 +875,13 @@ class EffectModal extends Modal {
     this.contentEl.empty();
   }
 
-  /** Enable Add only once there's a label and a parseable duration. */
+  /** Add is enabled only once there's a label and a parseable duration. */
+  private canSubmit(): boolean {
+    return Boolean(this.label && isValidDuration(this.duration));
+  }
+
   private refresh(): void {
-    this.addButton?.setDisabled(!(this.label && isValidDuration(this.duration)));
+    this.addButton?.setDisabled(!this.canSubmit());
   }
 
   private submit(): void {
