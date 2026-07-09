@@ -34,11 +34,14 @@ interface DayEntry {
   name: string | null;
 }
 
-/** Calendarium's per-month store: weekday names, the weekday its day 1 lands on, and the laid-out
- *  weeks (each a row of day slots) from which leap/feast days carry their own name. */
+/** Calendarium's per-month store: weekday names, the weekday its day 1 lands on, the month's total
+ *  day count (base length + this year's leap days), and the laid-out weeks from which leap/feast days
+ *  carry their own name. */
 interface MonthStore {
   weekdays: Readable<NamedEntry[]>;
   firstDay: Readable<number>;
+  /** Total days this month for its year, including leap days; absent on older builds. */
+  days?: Readable<number>;
   /** Weeks of day slots (nulls pad the first/last week); absent on older builds. */
   daysAsWeeks?: Readable<(DayEntry | null)[][]>;
 }
@@ -232,12 +235,22 @@ const START_FORMAT_HINT = "year-month-day";
 const serializeStart = (date: CalDate, months: MonthEntry[]): string =>
   `${date.year}-${monthName(months, date.month)}-${date.day}`;
 
+/** The number of days in `date`'s month for its year, *including leap days* — Calendarium's own
+ *  per-month `days` count. Falls back to the static base length when the store isn't available
+ *  (older builds). Undefined when neither is known. */
+function monthDayCount(api: CalendarApi, date: CalDate, months: MonthEntry[]): number | undefined {
+  const days = api.getStore().getMonthStoreForDate?.(date)?.days;
+  const total = days && readStore(days);
+  return typeof total === "number" ? total : months[date.month]?.length;
+}
+
 /** Whether a parsed date sits within the calendar's bounds: a real month, and a day within that
- *  month's length (when known). Catches a transposed start whose day/year landed in the wrong slot
- *  (e.g. day 1089 in a 28-day month) — which parses "successfully" but is nonsense. */
-function dateInRange(date: CalDate, months: MonthEntry[]): boolean {
+ *  month's length counting leap days (so a legitimate feast day like Grimvold 29 isn't rejected).
+ *  Catches a transposed start whose day/year landed in the wrong slot (e.g. day 1089 in a 30-day
+ *  month) — which parses "successfully" but is nonsense. */
+function dateInRange(api: CalendarApi, date: CalDate, months: MonthEntry[]): boolean {
   if (date.month < 0 || date.month >= months.length || date.day < 1) return false;
-  const length = months[date.month]?.length;
+  const length = monthDayCount(api, date, months);
   return typeof length !== "number" || date.day <= length;
 }
 
@@ -270,7 +283,7 @@ export function startDateError(
     const months = api.getObject().static.months;
     const parsed = parseStartDate(api, start);
     const badMonth = !!parsed && hasUnknownMonthSegment(start, months);
-    if (parsed && !badMonth && dateInRange(parsed, months)) return undefined;
+    if (parsed && !badMonth && dateInRange(api, parsed, months)) return undefined;
 
     // A bad month name means the segments themselves are wrong, so "reads as" would just repeat the
     // silent default — only report the parsed reading when the month resolved but the date is out of range.

@@ -296,6 +296,22 @@ describe("startDateError", () => {
     expect(startDateError("Dolmenwood", "1089-1-28")).toBeUndefined(); // numeric month in range
   });
 
+  it("accepts a day that lands on a leap/feast day (month length counts leap days)", () => {
+    // Grimvold: 28 base days + 2 feasts (Hanglemas, Dyboll's Day) = 30 days for the year.
+    stubCalendarium({
+      getAPI: () => ({
+        getObject: () => ({ name: "Dolmenwood", static: { months: DOLMENWOOD_MONTHS } }),
+        getStore: () => ({ getMonthStoreForDate: () => ({ days: readable(30) }) }),
+        getCurrentDate: () => ({ day: 15, month: 0, year: 1089 }),
+        parseDate: yearFirstParse(DOLMENWOOD_MONTHS),
+      }),
+      getCalendars: () => ["Dolmenwood"],
+    });
+    expect(startDateError("Dolmenwood", "1089-Grimvold-29")).toBeUndefined(); // feast day
+    expect(startDateError("Dolmenwood", "1089-Grimvold-30")).toBeUndefined(); // feast day
+    expect(startDateError("Dolmenwood", "1089-Grimvold-31")).toContain("1089-Grimvold-31"); // past month end
+  });
+
   it("errors on a day-first start that transposes day and year into the wrong slots", () => {
     stubCalendarium(yearFirst);
     // "28-Grimvold-1089" parsed year-first → year 28, day 1089 (Grimvold has only 28 days).
