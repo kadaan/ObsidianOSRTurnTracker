@@ -1,9 +1,9 @@
 {
-  "id": "osr-turn-tracker",
-  "name": "OSR Turn Tracker",
+  "id": "osr-tools",
+  "name": "OSR Tools",
   "version": "2.0.9",
   "minAppVersion": "1.4.0",
-  "description": "A simple OSR dungeon turn tracker: track exploration turns, light sources, and timed effects.",
+  "description": "A collection of tools for running OSR games in Obsidian, including a dungeon turn tracker for exploration turns, light sources, and timed effects.",
   "author": "Joel Baranick",
   "isDesktopOnly": false
 }

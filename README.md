@@ -1,4 +1,4 @@
-# OSR Turn Tracker
+# OSR Tools
 
 An Obsidian plugin for running old-school dungeon exploration: track the 10-minute
 exploration turn, light sources, and timed effects right inside a note. Everything lives
@@ -37,13 +37,13 @@ scripts, themes, or JavaScript to enable.
 ### Community plugins
 
 Once accepted into the Obsidian community store: **Settings → Community plugins → Browse**,
-search for "OSR Turn Tracker", install, and enable.
+search for "OSR Tools", install, and enable.
 
 ### Manual
 
 Download `main.js`, `manifest.json`, and `styles.css` from the
 [latest release](../../releases/latest) into
-`<vault>/.obsidian/plugins/osr-turn-tracker/`, then enable the plugin in
+`<vault>/.obsidian/plugins/osr-tools/`, then enable the plugin in
 **Settings → Community plugins**.
 
 ### BRAT

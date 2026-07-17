@@ -14,7 +14,7 @@ describe("release metadata", () => {
   const pkg = readRootJson("package.json");
 
   it("manifest.json carries every field the community store requires", () => {
-    expect(manifest.id).toBe("osr-turn-tracker");
+    expect(manifest.id).toBe("osr-tools");
     expect(typeof manifest.name).toBe("string");
     expect(typeof manifest.description).toBe("string");
     expect(typeof manifest.author).toBe("string");

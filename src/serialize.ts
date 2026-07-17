@@ -1,4 +1,5 @@
 import { stringify as stringifyYaml } from "yaml";
+import { fenceBlock } from "./core/block";
 import { Marker, TrackerState, TRACKER_LANG } from "./model";
 
 /**
@@ -23,7 +24,7 @@ export function serializeTrackerState(state: TrackerState): string {
 
 /** Wrap serialized state in a `turn-tracker` fenced code block, ready to insert into a note. */
 export function fenceTrackerBlock(state: TrackerState): string {
-  return `\`\`\`${TRACKER_LANG}\n${serializeTrackerState(state)}\n\`\`\``;
+  return fenceBlock(TRACKER_LANG, serializeTrackerState(state));
 }
 
 /** A marker's display name for sorting — its custom label, else its type. */
