@@ -24,7 +24,6 @@ import {
   TFile,
 } from "obsidian";
 import { commandIds } from "./commands";
-import { parseTrackerState } from "./parse";
 import { renderError, renderTracker } from "./render";
 import {
   addEffect,
@@ -43,7 +42,9 @@ import {
   removeNote,
   toggleAt,
 } from "./actions";
-import { applyTrackerAction } from "./apply";
+import { trackerCodec } from "./apply";
+import { applyAction } from "./core/apply";
+import { BlockCodec, NoteContext, RenderContext, ToolModule } from "./core/tool";
 import { isValidDuration, rollDuration } from "./dice";
 import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./block";
 import { fenceTrackerBlock } from "./serialize";
@@ -142,74 +143,10 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     this.effectHistory = normalizeEffectHistory(loaded.effectHistory);
     this.addSettingTab(new OsrSettingsTab(this.app, this));
 
-    // Processors registered on the plugin are auto-detached on unload.
-    this.registerMarkdownCodeBlockProcessor(TRACKER_LANG, (source, el, ctx) => {
-      const result = parseTrackerState(source);
-      if (!result.ok) {
-        renderError(el, result.error);
-        return;
-      }
-      // Resolve the effective calendar/start: the block's own values (authoritative once written),
-      // then note frontmatter (fills a block that still lacks its own value, so a corrected
-      // frontmatter reloads it), then Calendarium's default calendar / current date.
-      const frontmatter = this.app.metadataCache.getCache(ctx.sourcePath)?.frontmatter;
-      const resolved = this.resolveState(result.state, frontmatter);
-      // A typo'd calendar name or an unparseable start fails loudly rather than silently defaulting.
-      const calErr = calendarError(resolved.calendar) ?? startDateError(resolved.calendar, resolved.start);
-      if (calErr) {
-        renderError(el, calErr);
-        return;
-      }
-      const state = { ...result.state, calendar: resolved.calendar, start: resolved.start };
-      // Anchor a block that's missing calendar/start by persisting the resolved values — but only in
-      // reading mode. Writing to a file open in an editor races its unsaved buffer and duplicates the
-      // block (the insert command bakes for the edit-mode case via a safe editor write instead).
-      const anchorCalendar = resolved.calendar && !result.state.calendar;
-      const anchorStart = resolved.start && !result.state.start;
-      if ((anchorCalendar || anchorStart) && !this.isFileBeingEdited(ctx.sourcePath)) {
-        this.backfill(el, ctx, resolved);
-      }
-      // Own any markdown render-children on a child scoped to this block, so they unload when the
-      // block re-renders. Passing the plugin as owner would leak them until the plugin unloads.
-      const renderChild = new MarkdownRenderChild(el);
-      ctx.addChild(renderChild);
-      renderTracker(el, state, this.settings, {
-        onEndTurn: () => void this.mutateFromWidget(el, ctx, endTurn),
-        onAdvanceHours: (hours) => void this.mutateFromWidget(el, ctx, advanceHours(hours)),
-        onBoxClick: (turn) => void this.mutateFromWidget(el, ctx, toggleAt(turn)),
-        onLight: (presetId, startsAt) => {
-          const transform = this.lightTransform(presetId, startsAt);
-          if (transform) void this.mutateFromWidget(el, ctx, transform);
-        },
-        onAddEffect: (startsAt) =>
-          this.openEffectModal(startsAt, (transform) => void this.mutateFromWidget(el, ctx, transform)),
-        onClearExpired: () => void this.mutateFromWidget(el, ctx, clearExpired),
-        onClearAll: () => void this.mutateFromWidget(el, ctx, clearAll),
-        onRemoveMarker: (index, label) =>
-          new ConfirmModal(this.app, `Remove "${label}"?`, () =>
-            void this.mutateFromWidget(el, ctx, removeMarker(index)),
-          ).open(),
-        onRenameMarker: (index, name) =>
-          void this.mutateFromWidget(el, ctx, renameMarker(index, name)),
-        onPause: (index) => void this.mutateFromWidget(el, ctx, pauseMarker(index)),
-        onResume: (index) => void this.mutateFromWidget(el, ctx, resumeMarker(index)),
-        onSetRemaining: (index, turns) =>
-          void this.mutateFromWidget(el, ctx, setRemaining(index, turns)),
-        onCopyState: () => void this.copyState(state),
-        onAddNote: (at) =>
-          this.openNoteModal(at, (transform) => void this.mutateFromWidget(el, ctx, transform)),
-        onEditNote: (index, text) =>
-          new NoteModal(this.app, text, (next) =>
-            void this.mutateFromWidget(el, ctx, editNote(index, next)),
-          ).open(),
-        onDeleteNote: (index) =>
-          new ConfirmModal(this.app, "Delete this note?", () =>
-            void this.mutateFromWidget(el, ctx, removeNote(index)),
-          ).open(),
-        hotkey: (commandId) => this.hotkeyLabel(commandId),
-      }, makeFantasyDayHeader(state, () => this.warnCalendar()),
-      (host, text) => void MarkdownRenderer.render(this.app, text, host, ctx.sourcePath, renderChild));
-    });
+    // Each tool renders its own code block through the shared host. Processors registered on the
+    // plugin are auto-detached on unload.
+    const tools = [this.createTurnTrackerTool()];
+    for (const tool of tools) this.registerTool(tool);
 
     this.addCommand({
       id: commandIds.endTurn,
@@ -269,9 +206,7 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       name: "Insert turn tracker",
       editorCallback: (editor) => {
         const file = this.app.workspace.getActiveFile();
-        const frontmatter = file
-          ? this.app.metadataCache.getFileCache(file)?.frontmatter
-          : undefined;
+        const frontmatter = file ? this.frontmatterAt(file.path) : undefined;
         const base: TrackerState = { position: 0, markers: [] };
         // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained;
         // an invalid frontmatter value is left out and surfaces as an error on render.
@@ -338,6 +273,112 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     await this.saveSettings();
   }
 
+  /** Register a tool's code-block processor: parse via its codec, let it resolve/validate against the
+   *  note, then render it with a `mutate` bridge onto the shared write funnel. */
+  private registerTool<S>(tool: ToolModule<S>): void {
+    this.registerMarkdownCodeBlockProcessor(tool.lang, (source, el, ctx) => {
+      const parsed = tool.codec.parse(source);
+      if (!parsed.ok) {
+        renderError(el, parsed.error);
+        return;
+      }
+      let state = parsed.state;
+      if (tool.prepare) {
+        const note: NoteContext = { frontmatter: this.frontmatterAt(ctx.sourcePath) };
+        const prepared = tool.prepare(state, note, (t) =>
+          this.backfillTransform(el, ctx, tool.codec, t),
+        );
+        if ("error" in prepared) {
+          renderError(el, prepared.error);
+          return;
+        }
+        state = prepared.state;
+      }
+      // Own any markdown render-children on a child scoped to this block, so they unload when the
+      // block re-renders. Passing the plugin as owner would leak them until the plugin unloads.
+      const renderChild = new MarkdownRenderChild(el);
+      ctx.addChild(renderChild);
+      tool.render({
+        container: el,
+        state,
+        sourcePath: ctx.sourcePath,
+        mutate: (transform) =>
+          this.persistWidgetMutation(el, ctx, tool.codec, transform, tool.afterWrite),
+        renderMarkdown: (host, text) =>
+          void MarkdownRenderer.render(this.app, text, host, ctx.sourcePath, renderChild),
+        hotkeyLabel: (commandId) => this.hotkeyLabel(commandId),
+      });
+    });
+  }
+
+  /** The turn tracker as a self-contained tool module: its codec, frontmatter resolution, and widget. */
+  private createTurnTrackerTool(): ToolModule<TrackerState> {
+    return {
+      id: TRACKER_LANG,
+      lang: TRACKER_LANG,
+      displayName: "Turn tracker",
+      codec: trackerCodec,
+      afterWrite: this.syncCalendarDay,
+      prepare: (state, note, backfill) => {
+        // Resolve the effective calendar/start: the block's own values (authoritative once written),
+        // then note frontmatter (fills a block that still lacks its own value, so a corrected
+        // frontmatter reloads it), then Calendarium's default calendar / current date.
+        const resolved = this.resolveState(state, note.frontmatter);
+        // A typo'd calendar name or an unparseable start fails loudly rather than silently defaulting.
+        const calErr =
+          calendarError(resolved.calendar) ?? startDateError(resolved.calendar, resolved.start);
+        if (calErr) return { error: calErr };
+        // Anchor a block missing calendar/start by persisting the resolved values (the host skips the
+        // write while the file is open in an editor, to avoid racing its buffer).
+        if ((resolved.calendar && !state.calendar) || (resolved.start && !state.start)) {
+          backfill((s) => this.fillMissing(s, resolved, false));
+        }
+        return { state: { ...state, calendar: resolved.calendar, start: resolved.start } };
+      },
+      render: (ctx) => this.renderTrackerWidget(ctx),
+    };
+  }
+
+  /** Build the tracker widget's handlers from the generic `mutate` bridge and render it. */
+  private renderTrackerWidget(ctx: RenderContext<TrackerState>): void {
+    // Fill the block's missing calendar/start (from live frontmatter) on each user action, so the
+    // first write anchors them. Reads frontmatter fresh at click time, not at render time.
+    const mutate = (transform: Transform): void =>
+      ctx.mutate(this.withResolvedDefaults(transform, this.frontmatterAt(ctx.sourcePath)));
+    renderTracker(
+      ctx.container,
+      ctx.state,
+      this.settings,
+      {
+        onEndTurn: () => mutate(endTurn),
+        onAdvanceHours: (hours) => mutate(advanceHours(hours)),
+        onBoxClick: (turn) => mutate(toggleAt(turn)),
+        onLight: (presetId, startsAt) => {
+          const transform = this.lightTransform(presetId, startsAt);
+          if (transform) mutate(transform);
+        },
+        onAddEffect: (startsAt) => this.openEffectModal(startsAt, mutate),
+        onClearExpired: () => mutate(clearExpired),
+        onClearAll: () => mutate(clearAll),
+        onRemoveMarker: (index, label) =>
+          new ConfirmModal(this.app, `Remove "${label}"?`, () => mutate(removeMarker(index))).open(),
+        onRenameMarker: (index, name) => mutate(renameMarker(index, name)),
+        onPause: (index) => mutate(pauseMarker(index)),
+        onResume: (index) => mutate(resumeMarker(index)),
+        onSetRemaining: (index, turns) => mutate(setRemaining(index, turns)),
+        onCopyState: () => void this.copyState(ctx.state),
+        onAddNote: (at) => this.openNoteModal(at, mutate),
+        onEditNote: (index, text) =>
+          new NoteModal(this.app, text, (next) => mutate(editNote(index, next))).open(),
+        onDeleteNote: (index) =>
+          new ConfirmModal(this.app, "Delete this note?", () => mutate(removeNote(index))).open(),
+        hotkey: (commandId) => ctx.hotkeyLabel(commandId),
+      },
+      makeFantasyDayHeader(ctx.state, () => this.warnCalendar()),
+      ctx.renderMarkdown,
+    );
+  }
+
   /** Locate the file + block range for a rendered widget. `info.text`/line numbers are a consistent
    *  snapshot from getSectionInfo; undefined when the block can't be resolved (e.g. transient render). */
   private locateBlock(
@@ -350,7 +391,12 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     return { file, text: info.text, range: { lineStart: info.lineStart, lineEnd: info.lineEnd } };
   }
 
-  /** Write path for a click inside a rendered widget: block located via getSectionInfo. */
+  /** The note's frontmatter (or undefined), by path — the single accessor frontmatter reads funnel
+   *  through, so every block reads its note context one consistent way. */
+  private frontmatterAt(path: string): Record<string, unknown> | undefined {
+    return this.app.metadataCache.getCache(path)?.frontmatter;
+  }
+
   /** Roll a preset's duration and build the transform that lights it, or return undefined (after a
    *  notice) when the duration is invalid. Shared by the widget button and the light hotkey command. */
   private lightTransform(presetId: string, startsAt?: number): Transform | undefined {
@@ -395,19 +441,21 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     return hotkeys?.length ? formatHotkey(hotkeys[0]) : undefined;
   }
 
-  private async mutateFromWidget(
+  /** Widget write path: locate the clicked block via getSectionInfo, then persist through the funnel
+   *  with the tool's codec and post-write hook. The `mutate` bridge handed to a tool's render. */
+  private persistWidgetMutation<S>(
     el: HTMLElement,
     ctx: MarkdownPostProcessorContext,
-    transform: Transform,
-  ): Promise<void> {
+    codec: BlockCodec<S>,
+    transform: (state: S) => S,
+    afterWrite?: (before: S, after: S) => void,
+  ): void {
     const located = this.locateBlock(el, ctx);
     if (!located) {
-      new Notice("Could not locate the tracker block.");
+      new Notice("Could not locate the block.");
       return;
     }
-    const frontmatter = this.app.metadataCache.getCache(ctx.sourcePath)?.frontmatter;
-    const transformWithDefaults = this.withResolvedDefaults(transform, frontmatter);
-    await this.applyToFile(located.file, located.text, located.range, transformWithDefaults);
+    void this.applyToFile(located.file, located.text, located.range, codec, transform, afterWrite);
   }
 
   /** The effective calendar/start for a block, in precedence order: the block's own values, then the
@@ -458,19 +506,19 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     });
   }
 
-  /** Persist the resolved calendar/start into a block that's missing them (never overwriting the
-   *  block's own values). Only called once validated and only in reading mode. Quiet: retries next
-   *  render if the block can't be located this pass. */
-  private backfill(
+  /** Persist a seed transform into a block that's missing values — but never while the file is open in
+   *  an editor (writing then races the unsaved buffer). Quiet: retries next render if the block can't
+   *  be located this pass. Handed to a tool's `prepare` as its `backfill`. */
+  private backfillTransform<S>(
     el: HTMLElement,
     ctx: MarkdownPostProcessorContext,
-    resolved: { calendar?: string; start?: string },
+    codec: BlockCodec<S>,
+    transform: (state: S) => S,
   ): void {
+    if (this.isFileBeingEdited(ctx.sourcePath)) return;
     const located = this.locateBlock(el, ctx);
     if (!located) return;
-    void this.applyToFile(located.file, located.text, located.range, (s) =>
-      this.fillMissing(s, resolved, false),
-    );
+    void this.applyToFile(located.file, located.text, located.range, codec, transform);
   }
 
   /** Wrap a transform so it first fills the block's missing calendar/start with resolved, *valid*
@@ -494,36 +542,49 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       new Notice("Place the cursor in a turn-tracker block.");
       return;
     }
-    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    await this.applyToFile(file, text, range, this.withResolvedDefaults(transform, frontmatter));
+    const frontmatter = this.frontmatterAt(file.path);
+    await this.applyToFile(
+      file,
+      text,
+      range,
+      trackerCodec,
+      this.withResolvedDefaults(transform, frontmatter),
+      this.syncCalendarDay,
+    );
   }
 
-  private async applyToFile(
+  /** Tool-neutral write funnel: apply a transform to a block via its codec, write once, then run the
+   *  tool's post-write hook. Serialized by `applying` so rapid clicks can't race on a stale snapshot. */
+  private async applyToFile<S>(
     file: TFile,
     sourceText: string,
     range: BlockRange,
-    transform: Transform,
+    codec: BlockCodec<S>,
+    transform: (state: S) => S,
+    afterWrite?: (before: S, after: S) => void,
   ): Promise<void> {
     if (this.applying) return;
     this.applying = true;
     try {
-      const result = applyTrackerAction(sourceText, range, transform);
+      const result = applyAction(sourceText, range, codec, transform);
       if (!result.ok) {
         new Notice(result.error);
         return;
       }
       await this.app.vault.modify(file, result.newText);
-      // Push the new in-game day into Calendarium when the action crossed a day boundary.
-      if (
-        this.settings.syncCalendariumDate &&
-        dayOf(result.after.position) !== dayOf(result.before.position)
-      ) {
-        setCalendariumCurrentDate(result.after);
-      }
+      afterWrite?.(result.before, result.after);
     } finally {
       this.applying = false;
     }
   }
+
+  /** Turn-tracker post-write side effect: push the new in-game day into Calendarium when an action
+   *  crossed a day boundary. Passed to the write funnel so the funnel itself stays tool-neutral. */
+  private syncCalendarDay = (before: TrackerState, after: TrackerState): void => {
+    if (this.settings.syncCalendariumDate && dayOf(after.position) !== dayOf(before.position)) {
+      setCalendariumCurrentDate(after);
+    }
+  };
 
   private warnCalendar(): void {
     if (this.calendarWarned) return;

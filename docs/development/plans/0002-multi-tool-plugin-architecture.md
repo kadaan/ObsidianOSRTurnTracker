@@ -66,16 +66,17 @@ the tool and namespaced by the host.
 
 ### Acceptance criteria
 
-- [ ] A `ToolModule<S>` interface and a `RenderContext<S>` (with a single `mutate`
+- [x] A `ToolModule<S>` interface and a `RenderContext<S>` (with a single `mutate`
       bridge) exist in `core/`, and the host registers processors by looping a
       `TOOLS` array.
 - [x] The find-and-replace-block logic and the `applyAction` pipeline accept the fence
       language and the tool's codec as parameters (no hardcoded `turn-tracker`).
-- [ ] The single write funnel (with its re-entrancy guard and click-time block
+- [x] The single write funnel (with its re-entrancy guard and click-time block
       location) is tool-neutral; the Calendarium side effect runs via the turn
       tracker's `afterWrite`, not inline in the funnel.
-- [ ] The turn tracker is expressed as one `ToolModule` under `tools/turn-tracker/`;
-      its `render` builds its handlers internally from `ctx.mutate`.
+- [x] The turn tracker is expressed as one `ToolModule`
+      (`createTurnTrackerTool`; physical relocation to `tools/turn-tracker/` deferred
+      per the seams-now decision); its `render` builds its handlers from `ctx.mutate`.
 - [ ] Settings render via the tool's `settingsSection`; the turn tracker's commands
       are contributed by the tool and registered namespaced `<toolId>:<cmd>`.
 - [ ] Turn tracker behavior is unchanged in Reading and Live Preview modes (buttons,

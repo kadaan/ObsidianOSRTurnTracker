@@ -13,29 +13,43 @@ export interface BlockCodec<S> {
   serialize(state: S): string;
 }
 
+/** The note a block lives in, for tools that seed/validate block state against it before render. */
+export interface NoteContext {
+  frontmatter: Record<string, unknown> | undefined;
+}
+
 /** What a tool's `render` receives. `mutate` runs the shared write pipeline for this block. */
-export interface RenderContext<S, TSettings = unknown> {
+export interface RenderContext<S> {
   container: HTMLElement;
   state: S;
-  settings: TSettings;
+  /** Path of the note this block is in, so a tool can read live note context (e.g. frontmatter). */
+  sourcePath: string;
   /** Persist a block-local transform: locate the block, parse, transform, serialize, splice, write. */
   mutate(transform: (state: S) => S): void;
   renderMarkdown(el: HTMLElement, text: string): void;
   /** The hotkey a user assigned to `commandId` for this tool (or undefined), for quiet button hints. */
   hotkeyLabel(commandId: string): string | undefined;
-  /** True when there is no editable target (reading mode) — the widget renders without controls. */
-  readonly: boolean;
 }
 
-/** A tool packaged for the host: identity, its codec, its renderer, and an optional post-write hook. */
-export interface ToolModule<S, TSettings = unknown> {
+/** A tool packaged for the host: identity, its codec, its renderer, and optional lifecycle hooks. */
+export interface ToolModule<S> {
   /** Stable id; also the command-namespace prefix (`<id>:<command>`). */
   id: string;
   /** Fenced code-block language this tool renders (usually === id). */
   lang: string;
   displayName: string;
   codec: BlockCodec<S>;
-  render(ctx: RenderContext<S, TSettings>): void;
+  /**
+   * Resolve/validate parsed block state against the note before render. Returns the state to render,
+   * or an error to show inline. May call `backfill` to persist seeded values (the host guards the
+   * write, e.g. reading-mode only).
+   */
+  prepare?(
+    state: S,
+    note: NoteContext,
+    backfill: (transform: (state: S) => S) => void,
+  ): { state: S } | { error: string };
+  render(ctx: RenderContext<S>): void;
   /** Runs after a successful write, for side effects (e.g. Calendarium day sync). */
   afterWrite?(before: S, after: S): void | Promise<void>;
 }
