@@ -77,11 +77,14 @@ the tool and namespaced by the host.
 - [x] The turn tracker is expressed as one `ToolModule`
       (`createTurnTrackerTool`; physical relocation to `tools/turn-tracker/` deferred
       per the seams-now decision); its `render` builds its handlers from `ctx.mutate`.
-- [ ] Settings render via the tool's `settingsSection`; the turn tracker's commands
-      are contributed by the tool and registered namespaced `<toolId>:<cmd>`.
+- [x] The turn tracker's commands are contributed by the tool (`commands()`) and
+      registered namespaced `turn-tracker:<cmd>` by the host (spec builder unit-tested).
+- [~] Settings render via the tool's `settingsSection`. **Deferred to Phase 2** —
+      pure reorganization with no benefit until a second tool has settings; pulled
+      when the charge tracker adds its own section (per "pull, not push").
 - [ ] Turn tracker behavior is unchanged in Reading and Live Preview modes (buttons,
       box clicks, hotkeys, insert command, copy-state, day headers, calendar sync).
-- [ ] All existing tests pass unchanged; the frozen `turn-tracker` language,
+- [x] All existing tests pass unchanged; the frozen `turn-tracker` language,
       `osr-tt-` CSS, and `osrtt-ingame-date` property are untouched.
 
 ---
@@ -117,6 +120,10 @@ shared `ui/` kit and consumed by both tools.
       `current / max`, clamped to `[0, max]`.
 - [ ] Progress-bar, inline-edit, and stepper primitives live in `ui/` and are used by
       both the charge tracker and the (unchanged-behavior) turn tracker.
+- [ ] Settings tab is split per-tool (pulled from Phase 1): a `settingsSection` hook on
+      the host tool, the settings tab loops tools, and the turn tracker's existing
+      section (presets, effect history, Calendarium, property fields) moves behind it
+      unchanged — driven by the charge tracker needing its own section.
 - [ ] New CSS is namespaced `osr-charge-`; the turn tracker's `osr-tt-` styles are
       untouched.
 - [ ] Tests cover the codec (parse/serialize round-trip, unknown-key rejection) and

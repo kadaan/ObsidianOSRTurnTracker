@@ -23,7 +23,7 @@ import {
   TextComponent,
   TFile,
 } from "obsidian";
-import { commandIds } from "./commands";
+import { commandIds, turnTrackerCommandSpecs } from "./commands";
 import { renderError, renderTracker } from "./render";
 import {
   addEffect,
@@ -108,6 +108,21 @@ function formatHotkey(hotkey: Hotkey): string {
   return Platform.isMacOS ? parts.join("") : parts.join("+");
 }
 
+/** An editor command a tool contributes. `id` is already tool-namespaced; the host registers it. */
+interface ToolCommand {
+  id: string;
+  name: string;
+  editorCallback: (editor: Editor) => void;
+}
+
+/**
+ * A tool as the plugin host sees it: the portable `ToolModule` plus the Obsidian-integration hooks
+ * (editor commands). These live here, not in `core/`, so `core/` stays free of Obsidian types.
+ */
+interface PluginTool<S> extends ToolModule<S> {
+  commands?(): ToolCommand[];
+}
+
 export default class OsrTurnTrackerPlugin extends Plugin {
   settings: OsrTurnTrackerSettings = createDefaultSettings();
 
@@ -147,73 +162,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     // plugin are auto-detached on unload.
     const tools = [this.createTurnTrackerTool()];
     for (const tool of tools) this.registerTool(tool);
-
-    this.addCommand({
-      id: commandIds.endTurn,
-      name: "End turn",
-      editorCallback: (editor) => void this.mutateFromEditor(editor, endTurn),
-    });
-
-    // Registered from settings at load; changing the list takes effect on reload.
-    for (const hours of this.settings.advanceShortcuts) {
-      this.addCommand({
-        id: commandIds.advance(hours),
-        name: `Advance ${hours} hour${hours === 1 ? "" : "s"}`,
-        editorCallback: (editor) => void this.mutateFromEditor(editor, advanceHours(hours)),
-      });
-    }
-
-    this.addCommand({
-      id: commandIds.clearExpired,
-      name: "Clear expired markers",
-      editorCallback: (editor) => void this.mutateFromEditor(editor, clearExpired),
-    });
-
-    this.addCommand({
-      id: commandIds.clearAll,
-      name: "Clear all markers",
-      editorCallback: (editor) => void this.mutateFromEditor(editor, clearAll),
-    });
-
-    this.addCommand({
-      id: commandIds.addNote,
-      name: "Add note",
-      editorCallback: (editor) =>
-        this.openNoteModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
-    });
-
-    this.addCommand({
-      id: commandIds.addEffect,
-      name: "Add effect",
-      editorCallback: (editor) =>
-        this.openEffectModal(undefined, (transform) => void this.mutateFromEditor(editor, transform)),
-    });
-
-    // One command per light preset, like the advance shortcuts above (read from settings at load).
-    for (const preset of this.settings.presets) {
-      this.addCommand({
-        id: commandIds.light(preset.id),
-        name: `Light: ${preset.label}`,
-        editorCallback: (editor) => {
-          const transform = this.lightTransform(preset.id);
-          if (transform) void this.mutateFromEditor(editor, transform);
-        },
-      });
-    }
-
-    this.addCommand({
-      id: "insert-tracker",
-      name: "Insert turn tracker",
-      editorCallback: (editor) => {
-        const file = this.app.workspace.getActiveFile();
-        const frontmatter = file ? this.frontmatterAt(file.path) : undefined;
-        const base: TrackerState = { position: 0, markers: [] };
-        // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained;
-        // an invalid frontmatter value is left out and surfaces as an error on render.
-        const state = this.fillMissing(base, this.resolveState(base, frontmatter), true);
-        editor.replaceSelection(`${fenceTrackerBlock(state)}\n`);
-      },
-    });
 
     this.registerEditorSuggest(new TrackerSuggest(this.app, this));
   }
@@ -273,9 +221,12 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  /** Register a tool's code-block processor: parse via its codec, let it resolve/validate against the
-   *  note, then render it with a `mutate` bridge onto the shared write funnel. */
-  private registerTool<S>(tool: ToolModule<S>): void {
+  /** Register a tool with the host: its code-block processor (parse via codec → resolve/validate →
+   *  render with a `mutate` bridge onto the shared write funnel) and its editor commands. */
+  private registerTool<S>(tool: PluginTool<S>): void {
+    for (const command of tool.commands?.() ?? []) {
+      this.addCommand(command);
+    }
     this.registerMarkdownCodeBlockProcessor(tool.lang, (source, el, ctx) => {
       const parsed = tool.codec.parse(source);
       if (!parsed.ok) {
@@ -311,14 +262,15 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     });
   }
 
-  /** The turn tracker as a self-contained tool module: its codec, frontmatter resolution, and widget. */
-  private createTurnTrackerTool(): ToolModule<TrackerState> {
+  /** The turn tracker as a self-contained tool: codec, frontmatter resolution, widget, and commands. */
+  private createTurnTrackerTool(): PluginTool<TrackerState> {
     return {
       id: TRACKER_LANG,
       lang: TRACKER_LANG,
       displayName: "Turn tracker",
       codec: trackerCodec,
       afterWrite: this.syncCalendarDay,
+      commands: () => this.turnTrackerCommands(),
       prepare: (state, note, backfill) => {
         // Resolve the effective calendar/start: the block's own values (authoritative once written),
         // then note frontmatter (fills a block that still lacks its own value, so a corrected
@@ -337,6 +289,54 @@ export default class OsrTurnTrackerPlugin extends Plugin {
       },
       render: (ctx) => this.renderTrackerWidget(ctx),
     };
+  }
+
+  /** The turn tracker's editor commands: each spec (from the shared builder) paired with the editor
+   *  action for its id. Dynamic commands (advance shortcuts, light presets) are read from settings at
+   *  load; changing the lists takes effect on reload. */
+  private turnTrackerCommands(): ToolCommand[] {
+    const run = (transform: Transform) => (editor: Editor) =>
+      void this.mutateFromEditor(editor, transform);
+    const actions: Record<string, (editor: Editor) => void> = {
+      [commandIds.endTurn]: run(endTurn),
+      [commandIds.clearExpired]: run(clearExpired),
+      [commandIds.clearAll]: run(clearAll),
+      [commandIds.addNote]: (editor) =>
+        this.openNoteModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
+      [commandIds.addEffect]: (editor) =>
+        this.openEffectModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
+      [commandIds.insert]: (editor) => this.insertTracker(editor),
+      ...Object.fromEntries(
+        this.settings.advanceShortcuts.map((h) => [commandIds.advance(h), run(advanceHours(h))]),
+      ),
+      ...Object.fromEntries(
+        this.settings.presets.map((preset) => [
+          commandIds.light(preset.id),
+          (editor: Editor) => {
+            const transform = this.lightTransform(preset.id);
+            if (transform) void this.mutateFromEditor(editor, transform);
+          },
+        ]),
+      ),
+    };
+    return turnTrackerCommandSpecs(this.settings.advanceShortcuts, this.settings.presets).map(
+      (spec) => {
+        const editorCallback = actions[spec.id];
+        if (!editorCallback) throw new Error(`Turn tracker command "${spec.id}" has no action.`);
+        return { id: spec.id, name: spec.name, editorCallback };
+      },
+    );
+  }
+
+  /** Insert a fresh, self-contained tracker block at the cursor, pre-filled from note frontmatter. */
+  private insertTracker(editor: Editor): void {
+    const file = this.app.workspace.getActiveFile();
+    const frontmatter = file ? this.frontmatterAt(file.path) : undefined;
+    // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained; an
+    // invalid frontmatter value is left out and surfaces as an error on render.
+    const base: TrackerState = { position: 0, markers: [] };
+    const state = this.fillMissing(base, this.resolveState(base, frontmatter), true);
+    editor.replaceSelection(`${fenceTrackerBlock(state)}\n`);
   }
 
   /** Build the tracker widget's handlers from the generic `mutate` bridge and render it. */
