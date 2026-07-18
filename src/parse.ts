@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import { isNonNegativeInt } from "./core/validate";
 import {
   CUSTOM_TYPE,
   Failure,
@@ -16,9 +17,6 @@ export type ParseResult = { ok: true; state: TrackerState } | Failure;
 function fail(message: string): Failure {
   return { ok: false, error: `Invalid tracker: ${message}` };
 }
-
-const isNonNegativeInt = (value: unknown): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0;
 
 /** Every top-level key the block understands (including the legacy `effects` aliases, still read). */
 const KNOWN_KEYS = new Set<string>([...TOP_LEVEL_KEYS, ...LEGACY_EFFECT_KEYS]);

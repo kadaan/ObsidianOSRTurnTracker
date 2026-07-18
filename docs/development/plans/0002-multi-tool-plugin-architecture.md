@@ -126,7 +126,7 @@ shared `ui/` kit and consumed by both tools.
       unchanged — driven by the charge tracker needing its own section.
 - [ ] New CSS is namespaced `osr-charge-`; the turn tracker's `osr-tt-` styles are
       untouched.
-- [ ] Tests cover the codec (parse/serialize round-trip, unknown-key rejection) and
+- [x] Tests cover the codec (parse/serialize round-trip, unknown-key rejection) and
       the charge transforms (set/increment/decrement/clamp).
 
 ---
