@@ -7,7 +7,7 @@ describe("replaceCodeBlockBody", () => {
       "# Session",
       "Some intro.",
       "",
-      "```turn-tracker", // line 3 — opening fence
+      "```osr-tools-turn-tracker", // line 3 — opening fence
       "position: 14", // line 4 — body
       "```", // line 5 — closing fence
       "",
@@ -24,7 +24,7 @@ describe("replaceCodeBlockBody", () => {
     expect(result).toContain("start: Day 1\nposition: 15");
     expect(result).not.toContain("position: 14");
     // fences preserved
-    expect(result).toContain("```turn-tracker\nstart: Day 1\nposition: 15\n```");
+    expect(result).toContain("```osr-tools-turn-tracker\nstart: Day 1\nposition: 15\n```");
     // surrounding prose and the OTHER code block untouched
     expect(result).toContain("# Session");
     expect(result).toContain("Notes here.");
@@ -34,18 +34,18 @@ describe("replaceCodeBlockBody", () => {
 
 describe("findTrackerBlockAt", () => {
   it("returns the sole tracker block's fence range even when the cursor is outside it", () => {
-    const text = ["# Note", "```turn-tracker", "position: 3", "```", "after"].join("\n");
+    const text = ["# Note", "```osr-tools-turn-tracker", "position: 3", "```", "after"].join("\n");
 
     expect(findTrackerBlockAt(text, 0)).toEqual({ lineStart: 1, lineEnd: 3 });
   });
 
   it("picks the block the cursor sits inside when there are several", () => {
     const text = [
-      "```turn-tracker", // 0
+      "```osr-tools-turn-tracker", // 0
       "position: 1", // 1
       "```", // 2
       "between", // 3
-      "```turn-tracker", // 4
+      "```osr-tools-turn-tracker", // 4
       "position: 2", // 5
       "```", // 6
     ].join("\n");
@@ -55,11 +55,11 @@ describe("findTrackerBlockAt", () => {
 
   it("returns null when the cursor is outside and the target is ambiguous", () => {
     const text = [
-      "```turn-tracker", // 0
+      "```osr-tools-turn-tracker", // 0
       "position: 1", // 1
       "```", // 2
       "between", // 3
-      "```turn-tracker", // 4
+      "```osr-tools-turn-tracker", // 4
       "position: 2", // 5
       "```", // 6
     ].join("\n");

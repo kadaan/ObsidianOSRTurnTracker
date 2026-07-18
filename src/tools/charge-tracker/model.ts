@@ -1,7 +1,7 @@
 /** Core domain model for the charge tracker: named items with a current/max charge count. */
 
 /** The code-block language / fence info-string that identifies a charge tracker. */
-export const CHARGE_LANG = "charge-tracker";
+export const CHARGE_LANG = "osr-tools-charge-tracker";
 
 /**
  * Upper bound on an item's `max`, guarding against a hand-entered value that would render a

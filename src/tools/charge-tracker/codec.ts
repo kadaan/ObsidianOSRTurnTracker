@@ -1,5 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { ParseResult } from "../../core/tool";
+import { BlockCodec, ParseResult } from "../../core/tool";
 import { isNonNegativeInt } from "../../core/validate";
 import { ChargeItem, ChargeTrackerState, MAX_CHARGES } from "./model";
 
@@ -59,3 +59,9 @@ export function serializeChargeState(state: ChargeTrackerState): string {
   }));
   return stringifyYaml({ items }).trimEnd();
 }
+
+/** The charge tracker's block schema as a codec — its parse/serialize pair for the shared pipeline. */
+export const chargeCodec: BlockCodec<ChargeTrackerState> = {
+  parse: parseChargeState,
+  serialize: serializeChargeState,
+};

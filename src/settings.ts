@@ -23,7 +23,7 @@ export interface OsrTurnTrackerSettings {
 // Default to Calendarium's own per-note calendar property, so a note already tagged for Calendarium
 // works with the tracker without extra configuration.
 export const DEFAULT_CALENDAR_PROPERTY = "fc-calendar";
-export const DEFAULT_START_PROPERTY = "osrtt-ingame-date";
+export const DEFAULT_START_PROPERTY = "osr-tools-ingame-date";
 
 /** Fresh default settings — never shares array/object instances with the module defaults. */
 export const createDefaultSettings = (): OsrTurnTrackerSettings => ({

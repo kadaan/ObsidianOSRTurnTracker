@@ -1,4 +1,4 @@
-import { Menu, debounce, setIcon } from "obsidian";
+import { debounce, setIcon } from "obsidian";
 import { commandIds } from "./commands";
 import { LightPreset, PRESET_FALLBACK_ICON, TrackerState } from "./model";
 import { computeGrid, DayNote } from "./grid";
@@ -6,27 +6,15 @@ import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerEvent, MarkerPhase, inSegments, markerEventAt } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
+import { iconChip } from "./ui/icon-chip";
+import { inlineEdit } from "./ui/inline-edit";
+import { MenuItemSpec, openMenu } from "./ui/menu";
 
 /** How long the cursor must rest on a box before its non-active rows dim (avoids sweep flicker). */
 const DIM_HOVER_DELAY_MS = 250;
 
 /** A panel row paired with its active burn segments, used to dim rows on box hover. */
 type DimRow = { el: HTMLElement; segments: Array<[number, number]> };
-
-/** An entry in a context or caret menu. */
-type MenuItemSpec = { title: string; icon?: string; onClick: () => void };
-
-/** Open a menu of `items` at the event's position. */
-function openMenu(evt: MouseEvent, items: MenuItemSpec[]): void {
-  const menu = new Menu();
-  for (const it of items) {
-    menu.addItem((item) => {
-      item.setTitle(it.title).onClick(it.onClick);
-      if (it.icon) item.setIcon(it.icon);
-    });
-  }
-  menu.showAtMouseEvent(evt);
-}
 
 /** Menu item that lights a preset (control bar and box menu; `startsAt` defaults to the current turn). */
 const presetItem = (handlers: TrackerHandlers, p: LightPreset, startsAt?: number): MenuItemSpec => ({
@@ -44,12 +32,7 @@ const customItem = (handlers: TrackerHandlers, startsAt?: number): MenuItemSpec 
 
 /** Append a trash-can delete control that runs `onDelete` (stopping propagation so it doesn't also select). */
 function deleteChip(parent: HTMLElement, onDelete: () => void): void {
-  const chip = parent.createSpan({ cls: "osr-tt-chip-x", attr: { "aria-label": "Delete" } });
-  setIcon(chip, "trash");
-  chip.addEventListener("click", (evt) => {
-    evt.stopPropagation();
-    onDelete();
-  });
+  iconChip(parent, "trash", "Delete", "osr-tt-chip-x", onDelete);
 }
 
 /** The turn a box event targets, or undefined if the event isn't over a box. */
@@ -77,53 +60,6 @@ export interface TrackerHandlers {
   onDeleteNote: (index: number) => void;
   /** The hotkey a user assigned to a command id (or undefined), shown quietly on its button. */
   hotkey?: (commandId: string) => string | undefined;
-}
-
-/**
- * Turn a display element into a click-to-edit field: clicking swaps it for an input, which commits
- * on Enter/blur (Escape cancels) and calls `onCommit` only when the value actually changed.
- * Returns a `start()` so the edit can also be opened programmatically (e.g. from a menu).
- */
-function inlineEdit(
-  target: HTMLElement,
-  opts: { value: string; cls: string; type?: string; onCommit: (value: string) => void },
-): () => void {
-  let editing = false;
-  const start = () => {
-    if (editing) return;
-    editing = true;
-    const input = createEl("input", { cls: opts.cls });
-    input.type = opts.type ?? "text";
-    input.value = opts.value;
-
-    let done = false;
-    const commit = (save: boolean) => {
-      if (done) return;
-      done = true;
-      editing = false;
-      const value = input.value.trim();
-      input.replaceWith(target); // restore immediately; a real change re-renders the widget
-      if (save && value !== opts.value) opts.onCommit(value);
-    };
-
-    input.addEventListener("click", (e) => e.stopPropagation()); // don't toggle the highlight
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") commit(true);
-      else if (e.key === "Escape") commit(false);
-    });
-    input.addEventListener("blur", () => commit(true));
-
-    target.replaceWith(input);
-    input.focus();
-    input.select();
-  };
-
-  target.addClass("is-editable");
-  target.addEventListener("click", (evt) => {
-    evt.stopPropagation();
-    start();
-  });
-  return start;
 }
 
 /**
@@ -390,12 +326,7 @@ function renderPanel(
       }
 
       if (phase === "paused") {
-        const play = rowEl.createSpan({ cls: "osr-tt-effect-play", attr: { "aria-label": "Resume" } });
-        setIcon(play, "play");
-        play.addEventListener("click", (evt) => {
-          evt.stopPropagation();
-          handlers.onResume(row.index);
-        });
+        iconChip(rowEl, "play", "Resume", "osr-tt-effect-play", () => handlers.onResume(row.index));
       }
       deleteChip(rowEl, () => handlers.onRemoveMarker(row.index, row.label));
     }

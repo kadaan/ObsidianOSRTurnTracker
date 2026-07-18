@@ -2,7 +2,7 @@
 
 An Obsidian plugin for running old-school dungeon exploration: track the 10-minute
 exploration turn, light sources, and timed effects right inside a note. Everything lives
-in a single ` ```turn-tracker ` code block whose YAML is the source of truth — no external
+in a single ` ```osr-tools-turn-tracker ` code block whose YAML is the source of truth — no external
 scripts, themes, or JavaScript to enable.
 
 > **Upgrading from the Templater version?** The original Templater / Meta-Bind build is
@@ -11,7 +11,7 @@ scripts, themes, or JavaScript to enable.
 
 ## Features
 
-- A `turn-tracker` code block that renders an interactive timeline: one box per turn,
+- An `osr-tools-turn-tracker` code block that renders an interactive timeline: one box per turn,
   grouped into hour rows (6 turns) and day blocks (144 turns).
 - **End Turn** and **advance by hours** (default +1h / +3h / +8h) as buttons and as
   hotkey-able commands.
@@ -56,14 +56,14 @@ track pre-release builds.
 Run the **Insert Turn Tracker** command (or type the block by hand) to drop a tracker:
 
 ````markdown
-```turn-tracker
+```osr-tools-turn-tracker
 position: 0
 ```
 ````
 
 When inserted into a note, the block's `calendar` and `start` are seeded from the note's
 frontmatter — by default the `fc-calendar` property (Calendarium's own, so a note already tagged
-for Calendarium just works) and `osrtt-ingame-date`. Both property names are configurable in
+for Calendarium just works) and `osr-tools-ingame-date`. Both property names are configurable in
 settings. If no calendar property is present, the tracker falls back to Calendarium's default
 calendar. Whenever a block ends up with a `calendar` but no `start` (seeded, defaulted, or typed
 into the block), the tracker fills `start` from Calendarium's current date on first render —
@@ -88,7 +88,7 @@ rewrites it on every action — but every field is plain, human-editable YAML. A
 populated block looks like this:
 
 ````markdown
-```turn-tracker
+```osr-tools-turn-tracker
 start: 600-Readying-5
 calendar: Calendar of Greyhawk
 position: 14

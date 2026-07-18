@@ -1,8 +1,8 @@
 /**
  * Command ids for the tracker's actions — the single source shared by command registration (main.ts)
  * and the hotkey hints shown on the widget's buttons (render.ts), so a hint always matches the
- * command it hints at. Ids are namespaced under the tool (`turn-tracker:<cmd>`); Obsidian namespaces
- * them again under the plugin as `<pluginId>:turn-tracker:<cmd>`.
+ * command it hints at. Ids are namespaced under the tool (`osr-tools-turn-tracker:<cmd>`); Obsidian
+ * namespaces them again under the plugin as `<pluginId>:osr-tools-turn-tracker:<cmd>`.
  */
 import { TRACKER_LANG } from "./model";
 

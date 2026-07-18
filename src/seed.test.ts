@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { seedTrackerState } from "./seed";
 
-const PROPS = { calendarProperty: "fc-calendar", startProperty: "osrtt-ingame-date" };
+const PROPS = { calendarProperty: "fc-calendar", startProperty: "osr-tools-ingame-date" };
 
 describe("seedTrackerState", () => {
   it("seeds start and calendar from the configured frontmatter properties", () => {
     const state = seedTrackerState(
-      { "osrtt-ingame-date": "2016-05-21T08:00", "fc-calendar": "Greyhawk" },
+      { "osr-tools-ingame-date": "2016-05-21T08:00", "fc-calendar": "Greyhawk" },
       PROPS,
     );
 

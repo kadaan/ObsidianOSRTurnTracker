@@ -1,7 +1,7 @@
 /** Core domain model for the OSR Turn Tracker. */
 
 /** The code-block language / fence info-string that identifies a tracker. */
-export const TRACKER_LANG = "turn-tracker";
+export const TRACKER_LANG = "osr-tools-turn-tracker";
 
 /** Advance-shortcut buttons/commands, in hours. Becomes configurable in a later phase. */
 export const DEFAULT_ADVANCE_SHORTCUTS = [1, 3, 8];

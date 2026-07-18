@@ -45,6 +45,8 @@ import {
 import { trackerCodec } from "./apply";
 import { applyAction } from "./core/apply";
 import { BlockCodec, NoteContext, RenderContext, ToolModule } from "./core/tool";
+import { createChargeTrackerTool } from "./tools/charge-tracker";
+import { ConfirmModal } from "./ui/confirm-modal";
 import { isValidDuration, rollDuration } from "./dice";
 import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./block";
 import { fenceTrackerBlock } from "./serialize";
@@ -160,8 +162,8 @@ export default class OsrTurnTrackerPlugin extends Plugin {
 
     // Each tool renders its own code block through the shared host. Processors registered on the
     // plugin are auto-detached on unload.
-    const tools = [this.createTurnTrackerTool()];
-    for (const tool of tools) this.registerTool(tool);
+    this.registerTool(this.createTurnTrackerTool());
+    this.registerTool(createChargeTrackerTool(this.app));
 
     this.registerEditorSuggest(new TrackerSuggest(this.app, this));
   }
@@ -766,35 +768,6 @@ class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
   }
 }
 
-/** A yes/no confirmation dialog; runs `onConfirm` only if the user confirms. */
-class ConfirmModal extends Modal {
-  constructor(
-    app: App,
-    private readonly message: string,
-    private readonly onConfirm: () => void,
-    private readonly confirmText = "Remove",
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.contentEl.createEl("p", { text: this.message });
-    new Setting(this.contentEl)
-      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton((b) => {
-        b.setButtonText(this.confirmText).onClick(() => {
-          this.onConfirm();
-          this.close();
-        });
-        b.buttonEl.addClass("mod-warning");
-      });
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-}
-
 /** Prompts for a note's free-form text (empty = new note, otherwise editing), then invokes `onSubmit`. */
 class NoteModal extends Modal {
   private text: string;
@@ -1134,14 +1107,19 @@ class OsrSettingsTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("osr-tt-settings"); // scope for the disabled-row styling
 
-    new Setting(containerEl)
+    // Group the turn tracker's settings under its own heading, nested so the heading reads as their
+    // parent (not a sibling of the sub-sections). Other tools' settings sit beside it as we grow.
+    new Setting(containerEl).setName("Turn Tracker").setHeading();
+    const body = containerEl.createDiv({ cls: "osr-settings-group" });
+
+    new Setting(body)
       .setName("Look-ahead buffer")
       .setDesc("Turns rendered past the furthest marker.")
       .addText((t) =>
         this.numberInput(t, 0, () => s.lookaheadBuffer, (n) => (s.lookaheadBuffer = n)),
       );
 
-    new Setting(containerEl)
+    new Setting(body)
       .setName("Advance shortcuts (hours)")
       .setDesc("Comma-separated. Buttons update live; commands take effect after reload.")
       .addText((t) =>
@@ -1155,7 +1133,7 @@ class OsrSettingsTab extends PluginSettingTab {
         }),
       );
 
-    this.propertyText({
+    this.propertyText(body, {
       name: "In-game date property",
       desc: "Note frontmatter property a new tracker reads its in-game start date from.",
       value: s.startProperty,
@@ -1165,14 +1143,14 @@ class OsrSettingsTab extends PluginSettingTab {
 
     const calendariumAvailable = isCalendariumAvailable();
 
-    new Setting(containerEl).setName("Calendarium").setHeading();
+    new Setting(body).setName("Calendarium").setHeading();
     if (!calendariumAvailable) {
-      new Setting(containerEl).setDesc(
+      new Setting(body).setDesc(
         "The Calendarium plugin isn't installed or enabled, so these options are unavailable.",
       );
     }
 
-    this.propertyText({
+    this.propertyText(body, {
       name: "Calendar property",
       desc:
         "Note frontmatter property a new tracker reads its calendar name from. " +
@@ -1183,7 +1161,7 @@ class OsrSettingsTab extends PluginSettingTab {
       set: (v) => (s.calendarProperty = v),
     });
 
-    new Setting(containerEl)
+    new Setting(body)
       .setName("Sync current date")
       .setDesc(
         "When a turn advances to a new day, set the Calendarium calendar's current date to the tracker's date. Requires a start date.",
@@ -1201,7 +1179,7 @@ class OsrSettingsTab extends PluginSettingTab {
           }),
       );
 
-    new Setting(containerEl)
+    new Setting(body)
       .setName("Presets")
       .setHeading()
       .addExtraButton((b) =>
@@ -1234,7 +1212,7 @@ class OsrSettingsTab extends PluginSettingTab {
     };
 
     s.presets.forEach((preset, i) => {
-      const row = new Setting(containerEl)
+      const row = new Setting(body)
         .setName(preset.label || "(unnamed)")
         .setDesc(
           `${preset.turns} turn${preset.turns === "1" ? "" : "s"}` +
@@ -1286,7 +1264,7 @@ class OsrSettingsTab extends PluginSettingTab {
 
     const history = this.plugin.effectHistoryView();
 
-    const historyHeading = new Setting(containerEl)
+    const historyHeading = new Setting(body)
       .setName("Effect history")
       .setDesc("Custom-effect labels learned for autocomplete and duration pre-fill.")
       .setHeading();
@@ -1302,13 +1280,13 @@ class OsrSettingsTab extends PluginSettingTab {
     }
 
     if (history.length === 0) {
-      new Setting(containerEl).setDesc("No custom effects recorded yet.");
+      new Setting(body).setDesc("No custom effects recorded yet.");
     } else {
       for (const entry of history) {
         const durations = entry.durations
           .map(([expr, count]) => (count > 1 ? `${expr} (×${count})` : expr))
           .join(", ");
-        new Setting(containerEl)
+        new Setting(body)
           .setName(entry.label)
           .setDesc(`Used ${entry.count}× · ${durations}`)
           .addExtraButton((b) =>
@@ -1355,15 +1333,18 @@ class OsrSettingsTab extends PluginSettingTab {
 
   /** A settings row for a frontmatter-property name: trims input and restores the default when
    *  cleared. When `disabled`, the row is dimmed/mouse-blocked (row) and keyboard-blocked (control). */
-  private propertyText(opts: {
-    name: string;
-    desc: string;
-    value: string;
-    fallback: string;
-    disabled?: boolean;
-    set: (value: string) => void;
-  }): void {
-    new Setting(this.containerEl)
+  private propertyText(
+    containerEl: HTMLElement,
+    opts: {
+      name: string;
+      desc: string;
+      value: string;
+      fallback: string;
+      disabled?: boolean;
+      set: (value: string) => void;
+    },
+  ): void {
+    new Setting(containerEl)
       .setName(opts.name)
       .setDesc(opts.desc)
       .setDisabled(!!opts.disabled)

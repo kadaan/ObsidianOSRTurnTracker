@@ -4,7 +4,7 @@ import { endTurn } from "./actions";
 
 describe("applyTrackerAction", () => {
   it("applies End Turn: increments position in the block, preserving surrounding text", () => {
-    const file = ["intro", "```turn-tracker", "position: 14", "```", "outro"].join("\n");
+    const file = ["intro", "```osr-tools-turn-tracker", "position: 14", "```", "outro"].join("\n");
 
     const result = applyTrackerAction(file, { lineStart: 1, lineEnd: 3 }, endTurn);
 
@@ -19,7 +19,7 @@ describe("applyTrackerAction", () => {
   });
 
   it("reports the parse error instead of writing when the block is malformed", () => {
-    const file = ["```turn-tracker", "position: -1", "```"].join("\n");
+    const file = ["```osr-tools-turn-tracker", "position: -1", "```"].join("\n");
 
     const result = applyTrackerAction(file, { lineStart: 0, lineEnd: 2 }, endTurn);
 

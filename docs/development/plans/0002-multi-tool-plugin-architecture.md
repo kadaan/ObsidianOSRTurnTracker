@@ -29,14 +29,17 @@ Durable decisions that apply across all phases:
   false, error }`, never throws; rejects unknown top-level keys; renders inline
   errors with the raw block still visible. Legacy migration lives inside each tool's
   `parse`.
-- **Fence languages**: `turn-tracker` (frozen), `charge-tracker`. (`xp-tracker`
-  reserved for the deferred XP tool.)
+- **Fence languages**: `osr-tools-turn-tracker`, `osr-tools-charge-tracker`
+  (renamed from `turn-tracker`/`charge-tracker` for the OSR Tools rebrand — a
+  breaking change accepted by the author). (`osr-tools-xp-tracker` reserved.)
 - **Layout**: `core/` (host infrastructure — fence match, apply, write funnel,
   registry types), `ui/` (shared widget kit), `tools/<id>/` (per-tool modules).
 - **Namespacing**: CSS `osr-tt-` (frozen), `osr-charge-`; Obsidian commands
   `<toolId>:<cmd>`.
-- **Frozen for back-compat**: the `turn-tracker` fence language, the `osr-tt-` CSS
-  prefix, and the `osrtt-ingame-date` frontmatter property.
+- **Frozen for back-compat**: the `osr-tt-` CSS prefix (internal class names). The
+  `turn-tracker` fence language and `osrtt-ingame-date` property were initially frozen
+  but later renamed (`osr-tools-turn-tracker`, `osr-tools-ingame-date`) under the
+  rebrand — existing user blocks/frontmatter must be updated to match.
 - **UI kit extraction is pull, not push**: shared widgets are lifted into `ui/` only
   when a second tool consumes them, not speculatively.
 
@@ -82,7 +85,7 @@ the tool and namespaced by the host.
 - [~] Settings render via the tool's `settingsSection`. **Deferred to Phase 2** —
       pure reorganization with no benefit until a second tool has settings; pulled
       when the charge tracker adds its own section (per "pull, not push").
-- [ ] Turn tracker behavior is unchanged in Reading and Live Preview modes (buttons,
+- [x] Turn tracker behavior is unchanged in Reading and Live Preview modes (buttons,
       box clicks, hotkeys, insert command, copy-state, day headers, calendar sync).
 - [x] All existing tests pass unchanged; the frozen `turn-tracker` language,
       `osr-tt-` CSS, and `osrtt-ingame-date` property are untouched.
@@ -110,22 +113,26 @@ shared `ui/` kit and consumed by both tools.
 
 ### Acceptance criteria
 
-- [ ] A `charge-tracker` fenced block renders an interactive widget in Reading and
-      Live Preview modes; malformed YAML shows an inline error with the raw block
-      visible.
-- [ ] Item state (`name`, `current`, `max`) round-trips through the tool's codec and
-      the shared write funnel.
-- [ ] A user can rename an item inline, click the count to set an exact value, and
-      increment/decrement a single charge via buttons; the progress bar reflects
-      `current / max`, clamped to `[0, max]`.
-- [ ] Progress-bar, inline-edit, and stepper primitives live in `ui/` and are used by
-      both the charge tracker and the (unchanged-behavior) turn tracker.
-- [ ] Settings tab is split per-tool (pulled from Phase 1): a `settingsSection` hook on
-      the host tool, the settings tab loops tools, and the turn tracker's existing
-      section (presets, effect history, Calendarium, property fields) moves behind it
-      unchanged — driven by the charge tracker needing its own section.
-- [ ] New CSS is namespaced `osr-charge-`; the turn tracker's `osr-tt-` styles are
-      untouched.
+- [x] An `osr-tools-charge-tracker` fenced block renders an interactive widget (Reading
+      and Live Preview via the shared processor); malformed YAML shows an inline error
+      via `renderError`. *(Pending vault smoke test.)*
+- [x] Item state (`name`, `current`, `max`) round-trips through the tool's codec and
+      the shared write funnel (`chargeCodec` → `registerTool` → `applyToFile`).
+- [x] A user can rename an item inline, click the current/max to set exact values,
+      increment/decrement via icon chips, **add** an item (button + right-click →
+      modal), and **remove** one (right-click / trash chip); the progress bar reflects
+      `current / max`, clamped to `[0, max]`. Row styled like the effect row.
+      *(Pending vault smoke test.)*
+- [~] Shared `ui/` primitives: `inline-edit` extracted and used by **both** tools;
+      `progress-bar` in `ui/` (used by the charge tracker). A separate `stepper`
+      primitive and retrofitting the turn tracker's own bar are left until a second
+      consumer needs them (pull, not push) — only `inline-edit` had two consumers.
+- [~] Settings nested under a **"Turn Tracker"** heading (an indented group, so the
+      heading reads as parent of Calendarium/Presets/Effect History). The full per-tool
+      `settingsSection` hook + tab-loops-tools split is deferred until a second tool
+      actually has settings to separate. (Obsidian has no native collapsible-group API.)
+- [x] New CSS is namespaced `osr-charge-` (plus a shared `osr-progress` bar); the turn
+      tracker's `osr-tt-` styles are untouched.
 - [x] Tests cover the codec (parse/serialize round-trip, unknown-key rejection) and
       the charge transforms (set/increment/decrement/clamp).
 

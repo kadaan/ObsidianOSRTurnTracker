@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { decrementCharge, incrementCharge, renameItem, setCharge } from "./actions";
+import {
+  addItem,
+  decrementCharge,
+  incrementCharge,
+  removeItem,
+  renameItem,
+  setCharge,
+  setMax,
+} from "./actions";
 import { ChargeTrackerState } from "./model";
 
 const state = (items: ChargeTrackerState["items"]): ChargeTrackerState => ({ items });
@@ -41,5 +49,33 @@ describe("renameItem", () => {
       current: 2,
       max: 5,
     });
+  });
+});
+
+describe("setMax", () => {
+  it("sets max and clamps current down when it exceeds the new max", () => {
+    const s = state([{ name: "Wand", current: 5, max: 7 }]);
+
+    expect(setMax(0, 3)(s).items[0]).toEqual({ name: "Wand", current: 3, max: 3 });
+    expect(setMax(0, 10)(s).items[0]).toEqual({ name: "Wand", current: 5, max: 10 });
+  });
+
+  it("clamps max to the render cap and floors at zero", () => {
+    const s = state([{ name: "Wand", current: 5, max: 7 }]);
+
+    expect(setMax(0, 999999)(s).items[0].max).toBe(1000);
+    expect(setMax(0, -3)(s).items[0]).toEqual({ name: "Wand", current: 0, max: 0 });
+  });
+});
+
+describe("addItem / removeItem", () => {
+  it("appends a new item and removes one by index", () => {
+    const s = state([{ name: "Wand", current: 2, max: 5 }]);
+
+    const added = addItem({ name: "Staff", current: 3, max: 3 })(s);
+    expect(added.items).toHaveLength(2);
+    expect(added.items[1]).toEqual({ name: "Staff", current: 3, max: 3 });
+
+    expect(removeItem(0)(added).items).toEqual([{ name: "Staff", current: 3, max: 3 }]);
   });
 });

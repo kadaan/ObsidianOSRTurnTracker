@@ -505,3 +505,176 @@ input.osr-tt-effect-time-edit {
   border-radius: var(--radius-s);
   background-color: transparent;
 }
+
+/* Shared UI kit: a horizontal fill bar (used by the charge tracker). */
+.osr-progress {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.osr-progress-fill {
+  height: 100%;
+  background-color: var(--interactive-accent);
+}
+
+/* Charge tracker: one row per item — name · bar · count · − · + · trash — mirroring the effect row. */
+.osr-charge {
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+
+.osr-charge-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.osr-charge-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+/* Push Add item to the far right of the header. */
+.osr-charge-add {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.osr-charge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 2px 4px;
+  border-radius: var(--radius-s);
+}
+
+@media (hover: hover) {
+  .osr-charge-row:hover {
+    background-color: var(--background-modifier-hover);
+  }
+}
+
+.osr-charge-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Name click-to-edit: pointer + accent outline on hover, matching the effect name. */
+.osr-charge-name.is-editable {
+  cursor: pointer;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+}
+
+.osr-charge-name.is-editable:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-form-field, var(--background-primary));
+}
+
+/* Count sits right of the bar, sized/coloured like the effect row's turns-left number. */
+.osr-charge-count {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.osr-charge-sep {
+  margin: 0 0.15em;
+}
+
+.osr-charge-current.is-editable,
+.osr-charge-max.is-editable {
+  cursor: pointer;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+}
+
+.osr-charge-current.is-editable:hover,
+.osr-charge-max.is-editable:hover {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-modifier-form-field, var(--background-primary));
+}
+
+/* Inline-edit inputs: an explicit height so editing never changes the row height (an <input> won't
+   flex-stretch), matching the turn tracker's edit fields. */
+input.osr-charge-name-input,
+input.osr-charge-count-input {
+  box-sizing: border-box;
+  height: 1.6em;
+  margin: 0;
+  padding: 0 2px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  font-size: inherit;
+}
+
+input.osr-charge-name-input {
+  min-width: 6em;
+}
+
+input.osr-charge-count-input {
+  width: 3em;
+  font-family: var(--font-monospace);
+}
+
+/* Icon chips (−, +, trash), sized and coloured like the effect row's play/delete chips. */
+.osr-charge-btn,
+.osr-charge-delete {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.osr-charge-btn:hover {
+  color: var(--interactive-accent);
+}
+
+.osr-charge-delete:hover {
+  color: var(--text-error);
+}
+
+.osr-charge-btn .svg-icon,
+.osr-charge-delete .svg-icon {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.osr-charge-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.4em 0;
+}
+
+/* Add-item modal: mirror the add-effect modal — a fixed-width label column with roomy inputs that
+   take the bulk of each row. */
+.osr-charge-add-modal .setting-item-info {
+  flex: 0 0 10em;
+}
+
+.osr-charge-add-modal .setting-item-control {
+  flex: 1 1 auto;
+}
+
+.osr-charge-add-modal .setting-item-control input[type="text"],
+.osr-charge-add-modal .setting-item-control input[type="number"] {
+  width: 100%;
+  height: 2.2em;
+  font-size: var(--font-ui-medium);
+}
+
+/* A settings sub-group: indented under a parent heading so it reads as a child, not a sibling. */
+.osr-settings-group {
+  margin-left: 0.75em;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--background-modifier-border);
+}
