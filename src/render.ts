@@ -79,6 +79,17 @@ export function renderTracker(
   const root = container.createDiv({ cls: "osr-tt" });
   const dayHeaderFn = dayHeader ?? makeDayHeader(state);
 
+  // Title header, like the charge tracker's — no buttons; right-click copies the whole tracker.
+  const header = root.createDiv({ cls: "osr-tt-header" });
+  header.createSpan({ cls: "osr-tt-title", text: "Turn Tracker" });
+  if (handlers) {
+    header.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      openMenu(evt, [{ title: "Copy state", icon: "copy", onClick: () => handlers.onCopyState() }]);
+    });
+  }
+
   const panel = computeEffectPanel(state, settings.presets);
   // Markers that have started (every phase but upcoming) — the ones whose start/stop/pause/resume
   // transitions are drawn on the grid and named in a box's tooltip.
@@ -151,7 +162,7 @@ export function renderTracker(
       // Right-click a day to copy the whole tracker as a code block, to paste into a new note.
       headerEl.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
-        openMenu(evt, [{ title: "Copy tracker state", icon: "copy", onClick: () => handlers.onCopyState() }]);
+        openMenu(evt, [{ title: "Copy state", icon: "copy", onClick: () => handlers.onCopyState() }]);
       });
     }
 

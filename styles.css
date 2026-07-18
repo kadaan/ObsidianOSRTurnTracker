@@ -5,6 +5,19 @@
   line-height: 1.4;
 }
 
+/* Title header, mirroring the charge tracker's (minus the buttons). */
+.osr-tt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.osr-tt-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
 .osr-tt-controls {
   display: flex;
   flex-wrap: wrap;
@@ -653,6 +666,21 @@ input.osr-charge-count-input {
   color: var(--text-muted);
   font-style: italic;
   padding: 0.4em 0;
+}
+
+/* Spent items collapse into an "Exhausted" section, dimmed like the turn tracker's Expired list. */
+.osr-charge-exhausted {
+  margin-top: 0.5em;
+}
+
+.osr-charge-exhausted-title {
+  cursor: pointer;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.osr-charge-exhausted .osr-charge-row {
+  opacity: 0.55;
 }
 
 /* Add-item modal: mirror the add-effect modal — a fixed-width label column with roomy inputs that

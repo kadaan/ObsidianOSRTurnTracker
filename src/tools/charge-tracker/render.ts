@@ -18,6 +18,7 @@ import {
 import { serializeChargeState } from "./codec";
 import { CHARGE_LANG, ChargeTrackerState } from "./model";
 import { AddChargeItemModal } from "./modal";
+import { ChargeRow, computeChargePanel } from "./panel";
 
 /** Commit a numeric inline edit through `mutate` when the input is a non-empty whole number. Blank
  *  is ignored — Number("") is 0, which would silently zero the value (esp. max). */
@@ -56,7 +57,7 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
     if ((evt.target as HTMLElement).closest("button")) return; // leave the Add item button alone
     evt.preventDefault();
     evt.stopPropagation();
-    openMenu(evt, [{ title: "Copy Data", icon: "copy", onClick: () => void copyData() }]);
+    openMenu(evt, [{ title: "Copy state", icon: "copy", onClick: () => void copyData() }]);
   });
 
   if (ctx.state.items.length === 0) {
@@ -64,11 +65,12 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
     return;
   }
 
-  ctx.state.items.forEach((item, index) => {
+  // Render one item row — name · bar · count · − · + · trash — into `container`.
+  const renderRow = (container: HTMLElement, { item, index }: ChargeRow): void => {
     const confirmRemove = (): void =>
       new ConfirmModal(app, `Remove "${item.name}"?`, () => ctx.mutate(removeItem(index))).open();
 
-    const row = root.createDiv({ cls: "osr-charge-row" });
+    const row = container.createDiv({ cls: "osr-charge-row" });
     row.addEventListener("contextmenu", (evt) => {
       evt.preventDefault();
       evt.stopPropagation();
@@ -116,5 +118,19 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
       ctx.mutate(incrementCharge(index)),
     );
     iconChip(row, "trash", `Remove ${item.name}`, "osr-charge-delete", confirmRemove);
-  });
+  };
+
+  // Items with charges left render directly; spent ones drop into a collapsed, dimmed
+  // "Exhausted" section — the charge tracker's equivalent of the turn tracker's Expired list.
+  const { available, exhausted } = computeChargePanel(ctx.state);
+  available.forEach((row) => renderRow(root, row));
+
+  if (exhausted.length > 0) {
+    const section = root.createEl("details", { cls: "osr-charge-exhausted" });
+    section.createEl("summary", {
+      cls: "osr-charge-exhausted-title",
+      text: `Exhausted (${exhausted.length})`,
+    });
+    exhausted.forEach((row) => renderRow(section, row));
+  }
 }
