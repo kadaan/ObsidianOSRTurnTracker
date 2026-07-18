@@ -6,9 +6,9 @@ import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerEvent, MarkerPhase, inSegments, markerEventAt } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
-import { iconChip } from "./ui/icon-chip";
-import { inlineEdit } from "./ui/inline-edit";
-import { MenuItemSpec, openMenu } from "./ui/menu";
+import { iconChip } from "../../ui/icon-chip";
+import { inlineEdit } from "../../ui/inline-edit";
+import { MenuItemSpec, openMenu } from "../../ui/menu";
 
 /** How long the cursor must rest on a box before its non-active rows dim (avoids sweep flicker). */
 const DIM_HOVER_DELAY_MS = 250;

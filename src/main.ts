@@ -23,8 +23,8 @@ import {
   TextComponent,
   TFile,
 } from "obsidian";
-import { commandIds, turnTrackerCommandSpecs } from "./commands";
-import { renderError, renderTracker } from "./render";
+import { commandIds, turnTrackerCommandSpecs } from "./tools/turn-tracker/commands";
+import { renderError, renderTracker } from "./tools/turn-tracker/render";
 import {
   addEffect,
   advanceHours,
@@ -41,16 +41,16 @@ import {
   editNote,
   removeNote,
   toggleAt,
-} from "./actions";
-import { trackerCodec } from "./apply";
+} from "./tools/turn-tracker/actions";
+import { trackerCodec } from "./tools/turn-tracker/apply";
 import { applyAction } from "./core/apply";
 import { BlockCodec, NoteContext, RenderContext, ToolModule } from "./core/tool";
 import { createChargeTrackerTool } from "./tools/charge-tracker";
 import { ConfirmModal } from "./ui/confirm-modal";
 import { isValidDuration, rollDuration } from "./dice";
-import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./block";
-import { fenceTrackerBlock } from "./serialize";
-import { seedTrackerState } from "./seed";
+import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./tools/turn-tracker/block";
+import { fenceTrackerBlock } from "./tools/turn-tracker/serialize";
+import { seedTrackerState } from "./tools/turn-tracker/seed";
 import {
   CUSTOM_TYPE,
   LEGACY_EFFECT_KEYS,
@@ -62,7 +62,7 @@ import {
   Transform,
   TrackerState,
   dayOf,
-} from "./model";
+} from "./tools/turn-tracker/model";
 import {
   calendarError,
   calendarNames,
@@ -72,13 +72,13 @@ import {
   makeFantasyDayHeader,
   setCalendariumCurrentDate,
   startDateError,
-} from "./calendarium";
+} from "./tools/turn-tracker/calendarium";
 import {
   createDefaultSettings,
   DEFAULT_CALENDAR_PROPERTY,
   DEFAULT_START_PROPERTY,
   OsrTurnTrackerSettings,
-} from "./settings";
+} from "./tools/turn-tracker/settings";
 
 /** The slice of Obsidian's (untyped) hotkey manager we read to show a command's assigned hotkey. */
 interface HotkeyManager {

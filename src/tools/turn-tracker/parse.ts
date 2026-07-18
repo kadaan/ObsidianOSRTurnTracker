@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { isNonNegativeInt } from "./core/validate";
+import { isNonNegativeInt } from "../../core/validate";
 import {
   CUSTOM_TYPE,
   Failure,

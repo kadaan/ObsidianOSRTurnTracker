@@ -1,5 +1,5 @@
 import { stringify as stringifyYaml } from "yaml";
-import { fenceBlock } from "./core/block";
+import { fenceBlock } from "../../core/block";
 import { Marker, TrackerState, TRACKER_LANG } from "./model";
 
 /**

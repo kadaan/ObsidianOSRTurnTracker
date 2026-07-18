@@ -2,8 +2,8 @@ import { parseTrackerState } from "./parse";
 import { serializeTrackerState } from "./serialize";
 import { BlockRange } from "./block";
 import { TrackerState, Transform } from "./model";
-import { applyAction, ApplyResult as CoreApplyResult } from "./core/apply";
-import { BlockCodec } from "./core/tool";
+import { applyAction, ApplyResult as CoreApplyResult } from "../../core/apply";
+import { BlockCodec } from "../../core/tool";
 
 /** The turn tracker's block schema as a codec — its parse/serialize pair for the shared pipeline. */
 export const trackerCodec: BlockCodec<TrackerState> = {

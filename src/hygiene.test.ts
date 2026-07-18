@@ -3,9 +3,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // The community store forbids raw HTML injection, dynamic code eval, and network calls. This scans
-// the shipped source (everything under src/ except tests) so a regression fails the build.
+// the shipped source (everything under src/ except tests) so a regression fails the build. The walk
+// recurses into core/, ui/, and every tools/<id>/ so no module escapes the scan by living in a
+// subdirectory.
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
-const sources = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
+const sources = readdirSync(srcDir, { recursive: true })
+  .map((entry) => String(entry).split("\\").join("/")) // normalize Windows separators for the URL read
+  .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
 
 const FORBIDDEN: Array<{ label: string; re: RegExp }> = [
   { label: "innerHTML", re: /\.innerHTML\b/ },
