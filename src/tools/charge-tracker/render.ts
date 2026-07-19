@@ -51,7 +51,7 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
   const header = root.createDiv({ cls: "osr-charge-header" });
   header.createSpan({ cls: "osr-charge-title", text: "Charge Tracker" });
   header
-    .createEl("button", { cls: "osr-charge-add", text: "Add item..." })
+    .createEl("button", { cls: "osr-charge-add", text: "Add item…" })
     .addEventListener("click", openAdd);
   header.addEventListener("contextmenu", (evt) => {
     if ((evt.target as HTMLElement).closest("button")) return; // leave the Add item button alone
@@ -61,7 +61,7 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
   });
 
   if (ctx.state.items.length === 0) {
-    root.createDiv({ cls: "osr-charge-empty", text: "No items yet — use “Add item...”." });
+    root.createDiv({ cls: "osr-charge-empty", text: "No items yet — use “Add item…”." });
     return;
   }
 
@@ -75,7 +75,7 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
       evt.preventDefault();
       evt.stopPropagation();
       openMenu(evt, [
-        { title: "Add item...", icon: "plus", onClick: openAdd },
+        { title: "Add item…", icon: "plus", onClick: openAdd },
         { title: `Remove ${item.name}`, icon: "trash", onClick: confirmRemove },
       ]);
     });
