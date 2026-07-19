@@ -52,11 +52,10 @@ export function parseChargeState(source: string): ParseResult<ChargeTrackerState
  * Each item emits its fields in a stable order. Round-trips with `parseChargeState`.
  */
 export function serializeChargeState(state: ChargeTrackerState): string {
-  const items = state.items.map((item) => ({
-    name: item.name,
-    current: item.current,
-    max: item.max,
-  }));
+  // Emit items alphabetically by name so the stored block (and copies) match the widget's sorted order.
+  const items = [...state.items]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((item) => ({ name: item.name, current: item.current, max: item.max }));
   return stringifyYaml({ items }).trimEnd();
 }
 

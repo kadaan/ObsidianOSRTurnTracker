@@ -46,6 +46,6 @@ export function turnTrackerCommandSpecs(
     { id: commandIds.addNote, name: "Add note" },
     { id: commandIds.addEffect, name: "Add effect" },
     ...presets.map((preset) => ({ id: commandIds.light(preset.id), name: `Light: ${preset.label}` })),
-    { id: commandIds.insert, name: "Insert turn tracker" },
+    { id: commandIds.insert, name: "Insert" },
   ];
 }

@@ -14,8 +14,21 @@ describe("computeChargePanel", () => {
 
     const panel = computeChargePanel(s);
 
-    expect(panel.available.map((r) => r.item.name)).toEqual(["Wand", "Rod"]);
+    expect(panel.available.map((r) => r.item.name)).toEqual(["Rod", "Wand"]);
     expect(panel.exhausted.map((r) => r.item.name)).toEqual(["Staff"]);
+  });
+
+  it("sorts each list alphabetically by name, keeping original indices for the controls", () => {
+    const s = state([
+      { name: "Wand", current: 3, max: 3 },
+      { name: "Amulet", current: 1, max: 2 },
+      { name: "Rod", current: 2, max: 2 },
+    ]);
+
+    const panel = computeChargePanel(s);
+
+    expect(panel.available.map((r) => r.item.name)).toEqual(["Amulet", "Rod", "Wand"]);
+    expect(panel.available.map((r) => r.index)).toEqual([1, 2, 0]); // original array positions
   });
 
   it("keeps each row's original index so actions target the right item", () => {

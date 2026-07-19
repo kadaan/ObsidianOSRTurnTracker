@@ -29,6 +29,14 @@ export const setMax = (index: number, value: number): ChargeTransform =>
     return { ...item, max, current: Math.min(item.current, max) };
   });
 
+/** Recharge an item: set its max (clamped to [0, MAX_CHARGES]) and add `amount` to its current,
+ *  never past that max. Adding 0 with an unchanged max just re-caps current — a no-op. */
+export const recharge = (index: number, amount: number, newMax: number): ChargeTransform =>
+  mapItem(index, (item) => {
+    const max = clamp(newMax, 0, MAX_CHARGES);
+    return { ...item, max, current: clamp(item.current + amount, 0, max) };
+  });
+
 /** Append a new item to the list. */
 export const addItem = (item: ChargeItem): ChargeTransform => (state) => ({
   items: [...state.items, item],

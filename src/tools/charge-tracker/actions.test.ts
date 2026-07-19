@@ -3,6 +3,7 @@ import {
   addItem,
   decrementCharge,
   incrementCharge,
+  recharge,
   removeItem,
   renameItem,
   setCharge,
@@ -65,6 +66,28 @@ describe("setMax", () => {
 
     expect(setMax(0, 999999)(s).items[0].max).toBe(1000);
     expect(setMax(0, -3)(s).items[0]).toEqual({ name: "Wand", current: 0, max: 0 });
+  });
+});
+
+describe("recharge", () => {
+  it("adds to current, never past the (possibly new) max", () => {
+    const s = state([{ name: "Wand", current: 2, max: 7 }]);
+
+    expect(recharge(0, 3, 7)(s).items[0]).toEqual({ name: "Wand", current: 5, max: 7 });
+    expect(recharge(0, 100, 7)(s).items[0].current).toBe(7); // over-add caps at max
+  });
+
+  it("sets a new max and pulls current down to it", () => {
+    const s = state([{ name: "Wand", current: 6, max: 7 }]);
+
+    expect(recharge(0, 0, 3)(s).items[0]).toEqual({ name: "Wand", current: 3, max: 3 });
+  });
+
+  it("clamps the new max to the render cap and floors it at zero", () => {
+    const s = state([{ name: "Wand", current: 1, max: 1 }]);
+
+    expect(recharge(0, 0, 999999)(s).items[0].max).toBe(1000);
+    expect(recharge(0, 5, -3)(s).items[0]).toEqual({ name: "Wand", current: 0, max: 0 });
   });
 });
 

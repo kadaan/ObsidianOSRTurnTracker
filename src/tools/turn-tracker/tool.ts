@@ -73,7 +73,7 @@ class TurnTrackerTool {
     return {
       id: TRACKER_LANG,
       lang: TRACKER_LANG,
-      displayName: "Turn tracker",
+      displayName: "Turn Tracker",
       codec: trackerCodec,
       afterWrite: this.syncCalendarDay,
       commands: () => this.commands(),

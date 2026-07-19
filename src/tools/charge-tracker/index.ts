@@ -21,7 +21,7 @@ function chargeCommands(host: ChargeTrackerHost): ToolCommand[] {
   return [
     {
       id: chargeCommandIds.create,
-      name: "Insert charge tracker",
+      name: "Insert",
       editorCallback: (editor) =>
         editor.replaceSelection(`${fenceBlock(CHARGE_LANG, serializeChargeState({ items: [] }))}\n`),
     },
@@ -44,7 +44,7 @@ export function createChargeTrackerTool(host: ChargeTrackerHost): PluginTool<Cha
   return {
     id: CHARGE_LANG,
     lang: CHARGE_LANG,
-    displayName: "Charge tracker",
+    displayName: "Charge Tracker",
     codec: chargeCodec,
     commands: () => chargeCommands(host),
     render: (ctx) => renderChargeTracker(ctx, host.app),

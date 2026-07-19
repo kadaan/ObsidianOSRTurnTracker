@@ -11,6 +11,7 @@ import {
   addItem,
   decrementCharge,
   incrementCharge,
+  recharge,
   removeItem,
   renameItem,
   setCharge,
@@ -19,7 +20,7 @@ import {
 import { serializeChargeState } from "./codec";
 import { chargeCommandIds } from "./commands";
 import { CHARGE_LANG, ChargeTrackerState } from "./model";
-import { AddChargeItemModal } from "./modal";
+import { AddChargeItemModal, RechargeItemModal } from "./modal";
 import { ChargeRow, computeChargePanel } from "./panel";
 
 /** Commit a numeric inline edit through `mutate` when the input is a non-empty whole number. Blank
@@ -74,23 +75,30 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
       new ConfirmModal(app, `Remove "${item.name}"?`, () => ctx.mutate(removeItem(index))).open();
 
     const row = container.createDiv({ cls: "osr-charge-row" });
-    row.addEventListener("contextmenu", (evt) => {
-      evt.preventDefault();
-      evt.stopPropagation();
-      openMenu(evt, [
-        { title: "Add item…", icon: "plus", onClick: openAdd },
-        { title: `Remove ${item.name}`, icon: "trash", onClick: confirmRemove },
-      ]);
-    });
 
     // Name (the title): click to rename inline. A blank name is ignored so an item keeps its label.
     const name = row.createSpan({ cls: "osr-charge-name", text: item.name });
-    inlineEdit(name, {
+    const startRename = inlineEdit(name, {
       value: item.name,
       cls: "osr-charge-name-input",
       onCommit: (value) => {
         if (value) ctx.mutate(renameItem(index, value));
       },
+    });
+
+    // Recharge: add charges (number or dice) to current and optionally change the max.
+    const openRecharge = (): void =>
+      new RechargeItemModal(app, item, (amount, max) => ctx.mutate(recharge(index, amount, max))).open();
+
+    row.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      openMenu(evt, [
+        { title: "Add item…", icon: "plus", onClick: openAdd },
+        { title: "Rename", icon: "pencil", onClick: startRename },
+        { title: "Recharge…", icon: "battery-charging", onClick: openRecharge },
+        { title: "Delete", icon: "trash", onClick: confirmRemove },
+      ]);
     });
 
     // Bar fills the space between the name and the count, like the effect row's progress bar.

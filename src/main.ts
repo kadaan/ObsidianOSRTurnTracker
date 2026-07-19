@@ -127,7 +127,8 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   private registerTool<S>(tool: PluginTool<S>): void {
     this.tools.push(tool);
     for (const command of tool.commands?.() ?? []) {
-      this.addCommand(command);
+      // Group each command under its tool ("<Tool>: <command>"); Obsidian prepends the plugin name.
+      this.addCommand({ ...command, name: `${tool.displayName}: ${command.name}` });
     }
     this.registerMarkdownCodeBlockProcessor(tool.lang, (source, el, ctx) => {
       const parsed = tool.codec.parse(source);

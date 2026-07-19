@@ -65,11 +65,25 @@ describe("serializeChargeState", () => {
     expect(reparsed.state).toEqual(state);
   });
 
-  it("round-trips an empty tracker (the block 'Create charge tracker' inserts)", () => {
+  it("round-trips an empty tracker (the block 'Insert charge tracker' inserts)", () => {
     const reparsed = parseChargeState(serializeChargeState({ items: [] }));
 
     expect(reparsed.ok).toBe(true);
     if (!reparsed.ok) return;
     expect(reparsed.state).toEqual({ items: [] });
+  });
+
+  it("emits items sorted alphabetically by name", () => {
+    const yaml = serializeChargeState({
+      items: [
+        { name: "Wand", current: 1, max: 1 },
+        { name: "Amulet", current: 1, max: 1 },
+      ],
+    });
+    const reparsed = parseChargeState(yaml);
+
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok) return;
+    expect(reparsed.state.items.map((i) => i.name)).toEqual(["Amulet", "Wand"]);
   });
 });
