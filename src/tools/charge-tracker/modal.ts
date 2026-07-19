@@ -1,6 +1,6 @@
 import { App, ButtonComponent, Modal, Notice, Setting } from "obsidian";
 import { clamp } from "../../core/validate";
-import { isValidDuration, rollDuration } from "../../dice";
+import { isValidDuration, rollDuration } from "../../core/dice";
 import { ChargeItem, MAX_CHARGES } from "./model";
 
 /**

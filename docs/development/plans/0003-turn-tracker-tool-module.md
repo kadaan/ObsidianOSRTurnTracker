@@ -89,10 +89,11 @@ the turn-tracker modal/glue and `tools/charge-tracker/modal.ts` — to `core/dic
 
 ### Acceptance criteria
 
-- [ ] `dice.ts`/`dice.test.ts` live under `src/core/`.
-- [ ] Both tools import dice from `core/dice`; no top-level `dice.ts` remains.
-- [ ] `core/` remains obsidian-free.
-- [ ] `npx tsc --noEmit` clean, 198 tests pass, `npm run build` succeeds.
+- [x] `dice.ts`/`dice.test.ts` live under `src/core/`.
+- [x] Both tools import dice from `core/dice`; no top-level `dice.ts` remains.
+- [x] `core/` remains obsidian-free.
+- [x] `npx tsc --noEmit` clean, tests pass (214, per the recursive hygiene scan from
+      Phase 1), `npm run build` succeeds.
 
 ---
 

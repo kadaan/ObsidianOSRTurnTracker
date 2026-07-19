@@ -47,7 +47,7 @@ import { applyAction } from "./core/apply";
 import { BlockCodec, NoteContext, RenderContext, ToolModule } from "./core/tool";
 import { createChargeTrackerTool } from "./tools/charge-tracker";
 import { ConfirmModal } from "./ui/confirm-modal";
-import { isValidDuration, rollDuration } from "./dice";
+import { isValidDuration, rollDuration } from "./core/dice";
 import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./tools/turn-tracker/block";
 import { fenceTrackerBlock } from "./tools/turn-tracker/serialize";
 import { seedTrackerState } from "./tools/turn-tracker/seed";
