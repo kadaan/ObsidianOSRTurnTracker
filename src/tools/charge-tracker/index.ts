@@ -1,6 +1,5 @@
-import { Editor, Notice } from "obsidian";
-import { fenceBlock, findBlockAt } from "../../core/block";
-import { PluginTool, requireActiveEditor, ToolCommand, WriteHost } from "../../host";
+import { fenceBlock } from "../../core/block";
+import { blockCommand, CommandTarget, PluginTool, ToolCommand, WriteHost } from "../../host";
 import { addItem } from "./actions";
 import { chargeCodec, serializeChargeState } from "./codec";
 import { chargeCommandIds } from "./commands";
@@ -12,39 +11,26 @@ import { renderChargeTracker } from "./render";
  *  needing no settings, frontmatter, or calendar — so it adds nothing beyond the funnel. */
 export type ChargeTrackerHost = WriteHost<ChargeTrackerState>;
 
-/** The charge tracker's editor commands: create a new block, and add an item to the block at the
- *  cursor. `Create` is a plain (always-listed) command so it's reachable from the palette in any mode;
- *  `Add item` is editor-scoped to the block the cursor is in. */
+/** The charge tracker's commands. Insert needs a cursor to place the new block, so it's edit-only.
+ *  Add item acts on an existing block, so it's a `blockCommand` — listed in any view mode, but only
+ *  when its target is unambiguous (the block at the cursor, or the note's sole charge tracker). */
 function chargeCommands(host: ChargeTrackerHost): ToolCommand[] {
-  // Apply a transform to the charge block at the cursor, reading the buffer fresh (so a modal's delay
-  // can't act on a stale snapshot), mirroring the turn tracker's editor write path.
-  const mutateFromEditor = (editor: Editor, transform: ChargeTransform): void => {
-    const file = host.app.workspace.getActiveFile();
-    if (!file) return;
-    const text = editor.getValue();
-    const range = findBlockAt(text, editor.getCursor().line, CHARGE_LANG);
-    if (!range) {
-      new Notice("Place the cursor in a charge-tracker block.");
-      return;
-    }
-    void host.applyToFile(file, text, range, chargeCodec, transform);
-  };
+  const applyToTarget = (target: CommandTarget, transform: ChargeTransform): void =>
+    void host.applyToFile(target.file, target.text, target.range, chargeCodec, transform);
 
   return [
     {
       id: chargeCommandIds.create,
       name: "Insert charge tracker",
-      callback: () => {
-        const editor = requireActiveEditor(host.app, "insert charge tracker");
-        if (!editor) return;
-        editor.replaceSelection(`${fenceBlock(CHARGE_LANG, serializeChargeState({ items: [] }))}\n`);
-      },
+      editorCallback: (editor) =>
+        editor.replaceSelection(`${fenceBlock(CHARGE_LANG, serializeChargeState({ items: [] }))}\n`),
     },
     {
       id: chargeCommandIds.addItem,
       name: "Add item",
-      editorCallback: (editor) =>
-        new AddChargeItemModal(host.app, (item) => mutateFromEditor(editor, addItem(item))).open(),
+      checkCallback: blockCommand(host.app, CHARGE_LANG, (target) =>
+        new AddChargeItemModal(host.app, (item) => applyToTarget(target, addItem(item))).open(),
+      ),
     },
   ];
 }

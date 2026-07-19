@@ -127,11 +127,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
   private registerTool<S>(tool: PluginTool<S>): void {
     this.tools.push(tool);
     for (const command of tool.commands?.() ?? []) {
-      // Enforce ToolCommand's "set exactly one callback" contract — a command with neither would
-      // register as a dead no-op, one with both is ambiguous. Fail loudly at load, not silently.
-      if (!command.callback === !command.editorCallback) {
-        throw new Error(`Command "${command.id}" must set exactly one of callback / editorCallback.`);
-      }
       this.addCommand(command);
     }
     this.registerMarkdownCodeBlockProcessor(tool.lang, (source, el, ctx) => {

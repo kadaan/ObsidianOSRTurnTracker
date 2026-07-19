@@ -49,8 +49,10 @@ enable:
 - **Exhausted items** (0 charges left) drop into a collapsed, dimmed list, mirroring the turn
   tracker's expired effects; restore a charge to bring one back.
 - **Copy state** from the header's right-click menu to paste the tracker into another note.
-- **Commands and hotkeys**: *Create charge tracker* (always available) and *Add item* (acts on
-  the block at the cursor), both assignable to hotkeys.
+- **Commands and hotkeys** (both assignable to hotkeys): *Insert charge tracker* (while editing,
+  since it needs a cursor) and *Add item*, which works in reading or editing view — acting on the
+  block at your cursor or the note's only charge tracker, and hidden when the note has several with
+  no cursor to pick one.
 
 ## Installation
 
@@ -105,7 +107,7 @@ current state.
 
 ### Charge tracker
 
-Run the **Create Charge Tracker** command (or type the block by hand) to drop a charge tracker:
+Run the **Insert Charge Tracker** command (or type the block by hand) to drop a charge tracker:
 
 ````markdown
 ```osr-tools-charge-tracker
@@ -115,9 +117,10 @@ items: []
 
 It starts empty ("No items yet — use *Add item…*"). Then use the widget:
 
-- **Add item…** — the button at the top right, or the *Add item* command (which acts on the
-  block your cursor is in). Prompts for a name and a charge count (a number or dice like
-  `2d6+1`, rolled when added); the item starts full. Press Cmd/Ctrl+Enter to accept.
+- **Add item…** — the button at the top right, or the *Add item* command (which targets the block
+  at your cursor, or the note's only charge tracker). Prompts for a name and a charge count (a
+  number or dice like `2d6+1`, rolled when added); the item starts full. Press Cmd/Ctrl+Enter to
+  accept.
 - **− / +** — spend or restore one charge. **Click the current or max number** to set it exactly
   (lowering `max` below `current` pulls `current` down with it).
 - **Click an item's name** to rename it.

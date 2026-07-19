@@ -6,7 +6,7 @@ import { Editor, Notice, Plugin } from "obsidian";
 import { NoteContext, RenderContext } from "../../core/tool";
 import { rollDuration } from "../../core/dice";
 import { ConfirmModal } from "../../ui/confirm-modal";
-import { PluginTool, requireActiveEditor, ToolCommand, WriteHost } from "../../host";
+import { blockCommand, CommandTarget, PluginTool, ToolCommand, WriteHost } from "../../host";
 import {
   addEffect,
   advanceHours,
@@ -25,7 +25,6 @@ import {
   toggleAt,
 } from "./actions";
 import { trackerCodec } from "./apply";
-import { findTrackerBlockAt } from "./block";
 import {
   calendarError,
   currentDateAsStart,
@@ -104,52 +103,49 @@ class TurnTrackerTool {
     return { state: { ...state, calendar: resolved.calendar, start: resolved.start } };
   }
 
-  /** The turn tracker's editor commands: each spec (from the shared builder) paired with the editor
-   *  action for its id. Dynamic commands (advance shortcuts, light presets) are read from settings at
-   *  load; changing the lists takes effect on reload. */
+  /** The turn tracker's commands: each spec (from the shared builder) paired with its action. All but
+   *  Insert act on an existing block, so they're `blockCommand`s — listed in any view mode, but only
+   *  when their target is unambiguous (the block at the cursor, or the note's sole tracker). Insert
+   *  needs a cursor to place the new block, so it stays edit-only. Dynamic commands (advance shortcuts,
+   *  light presets) are read from settings at load; changing the lists takes effect on reload. */
   private commands(): ToolCommand[] {
-    const run = (transform: Transform) => (editor: Editor) =>
-      void this.mutateFromEditor(editor, transform);
-    const actions: Record<string, (editor: Editor) => void> = {
+    const run = (transform: Transform) => (target: CommandTarget) => void this.applyToTarget(target, transform);
+    const actions: Record<string, (target: CommandTarget) => void> = {
       [commandIds.endTurn]: run(endTurn),
       [commandIds.clearExpired]: run(clearExpired),
       [commandIds.clearAll]: run(clearAll),
-      [commandIds.addNote]: (editor) =>
-        this.openNoteModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
-      [commandIds.addEffect]: (editor) =>
-        this.openEffectModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
+      [commandIds.addNote]: (target) =>
+        this.openNoteModal(undefined, (t) => void this.applyToTarget(target, t)),
+      [commandIds.addEffect]: (target) =>
+        this.openEffectModal(undefined, (t) => void this.applyToTarget(target, t)),
       ...Object.fromEntries(
         this.host.settings.advanceShortcuts.map((h) => [commandIds.advance(h), run(advanceHours(h))]),
       ),
       ...Object.fromEntries(
         this.host.settings.presets.map((preset) => [
           commandIds.light(preset.id),
-          (editor: Editor) => {
+          (target: CommandTarget) => {
             const transform = this.lightTransform(preset.id);
-            if (transform) void this.mutateFromEditor(editor, transform);
+            if (transform) void this.applyToTarget(target, transform);
           },
         ]),
       ),
     };
     return turnTrackerCommandSpecs(this.host.settings.advanceShortcuts, this.host.settings.presets).map(
       (spec) => {
-        // Insert is the entry-point command — a plain (always-listed) callback so it's reachable from
-        // the palette even in reading mode, not gated behind an active editor like the block actions.
         if (spec.id === commandIds.insert) {
-          return { id: spec.id, name: spec.name, callback: () => this.insertTracker() };
+          return { id: spec.id, name: spec.name, editorCallback: (editor: Editor) => this.insertTracker(editor) };
         }
-        const editorCallback = actions[spec.id];
-        if (!editorCallback) throw new Error(`Turn tracker command "${spec.id}" has no action.`);
-        return { id: spec.id, name: spec.name, editorCallback };
+        const perform = actions[spec.id];
+        if (!perform) throw new Error(`Turn tracker command "${spec.id}" has no action.`);
+        return { id: spec.id, name: spec.name, checkCallback: blockCommand(this.host.app, TRACKER_LANG, perform) };
       },
     );
   }
 
-  /** Insert a fresh, self-contained tracker block at the active editor's cursor, pre-filled from note
-   *  frontmatter. Requires a note open in edit mode; notifies (rather than failing) if there isn't one. */
-  private insertTracker(): void {
-    const editor = requireActiveEditor(this.host.app, "insert a turn tracker");
-    if (!editor) return;
+  /** Insert a fresh, self-contained tracker block at the editor's cursor, pre-filled from note
+   *  frontmatter. An `editorCallback` command, so it's offered only while a note is being edited. */
+  private insertTracker(editor: Editor): void {
     const file = this.host.app.workspace.getActiveFile();
     const frontmatter = file ? this.host.frontmatterAt(file.path) : undefined;
     // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained; an
@@ -287,21 +283,14 @@ class TurnTrackerTool {
     return (s) => transform(this.fillMissing(s, this.resolveState(s, frontmatter), true));
   }
 
-  /** Write path for the command: block located relative to the editor cursor. */
-  private async mutateFromEditor(editor: Editor, transform: Transform): Promise<void> {
-    const file = this.host.app.workspace.getActiveFile();
-    if (!file) return;
-    const text = editor.getValue();
-    const range = findTrackerBlockAt(text, editor.getCursor().line);
-    if (!range) {
-      new Notice("Place the cursor in a turn-tracker block.");
-      return;
-    }
-    const frontmatter = this.host.frontmatterAt(file.path);
+  /** Command write path: apply a transform to a resolved target block (see `blockCommand`), filling
+   *  missing calendar/start from the note's live frontmatter, then syncing the Calendarium day. */
+  private async applyToTarget(target: CommandTarget, transform: Transform): Promise<void> {
+    const frontmatter = this.host.frontmatterAt(target.file.path);
     await this.host.applyToFile(
-      file,
-      text,
-      range,
+      target.file,
+      target.text,
+      target.range,
       trackerCodec,
       this.withResolvedDefaults(transform, frontmatter),
       this.syncCalendarDay,
