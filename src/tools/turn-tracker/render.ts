@@ -6,6 +6,7 @@ import { computeEffectPanel, EffectPanel, EffectRow } from "./panel";
 import { MarkerEvent, MarkerPhase, inSegments, markerEventAt } from "./markers";
 import { makeDayHeader, formatSpan } from "./dates";
 import { OsrTurnTrackerSettings } from "./settings";
+import { appendHotkeyHint } from "../../ui/hotkey-hint";
 import { iconChip } from "../../ui/icon-chip";
 import { inlineEdit } from "../../ui/inline-edit";
 import { MenuItemSpec, openMenu } from "../../ui/menu";
@@ -381,13 +382,8 @@ function renderControls(
   const hintFor = (commandId?: string) => (commandId ? handlers.hotkey?.(commandId) : undefined);
 
   // Fill a button with its label and, when the command has an assigned hotkey, a quiet trailing hint.
-  const fillButton = (btn: HTMLButtonElement, text: string, commandId?: string) => {
-    btn.createSpan({ text });
-    const hint = hintFor(commandId);
-    if (!hint) return;
-    btn.createSpan({ cls: "osr-tt-hotkey", text: hint });
-    btn.setAttribute("aria-label", `${text} (${hint})`);
-  };
+  const fillButton = (btn: HTMLButtonElement, text: string, commandId?: string) =>
+    appendHotkeyHint(btn, text, hintFor(commandId));
 
   const addButton = (text: string, onClick: () => void, commandId?: string) => {
     const btn = controls.createEl("button", { cls: "osr-tt-btn" });

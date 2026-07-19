@@ -64,4 +64,12 @@ describe("serializeChargeState", () => {
     if (!reparsed.ok) return;
     expect(reparsed.state).toEqual(state);
   });
+
+  it("round-trips an empty tracker (the block 'Create charge tracker' inserts)", () => {
+    const reparsed = parseChargeState(serializeChargeState({ items: [] }));
+
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok) return;
+    expect(reparsed.state).toEqual({ items: [] });
+  });
 });

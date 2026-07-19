@@ -2,11 +2,11 @@
  *  editor commands, modals, and autocomplete — all behind a small `TurnTrackerHost` seam so the
  *  plugin host (main.ts) stays tool-neutral. */
 
-import { App, Editor, Notice, Plugin, TFile } from "obsidian";
-import { BlockCodec, NoteContext, RenderContext } from "../../core/tool";
+import { Editor, Notice, Plugin } from "obsidian";
+import { NoteContext, RenderContext } from "../../core/tool";
 import { rollDuration } from "../../core/dice";
 import { ConfirmModal } from "../../ui/confirm-modal";
-import { PluginTool, ToolCommand } from "../../host";
+import { PluginTool, requireActiveEditor, ToolCommand, WriteHost } from "../../host";
 import {
   addEffect,
   advanceHours,
@@ -25,7 +25,7 @@ import {
   toggleAt,
 } from "./actions";
 import { trackerCodec } from "./apply";
-import { BlockRange, findTrackerBlockAt } from "./block";
+import { findTrackerBlockAt } from "./block";
 import {
   calendarError,
   currentDateAsStart,
@@ -51,22 +51,13 @@ import { fenceTrackerBlock } from "./serialize";
 import { TrackerSuggest } from "./suggest";
 import { OsrTurnTrackerSettings } from "./settings";
 
-/** The slice of the plugin host the turn tracker depends on: its settings and effect-history stores
- *  (owned by the host, persisted via `saveSettings`), the shared write funnel, frontmatter access,
- *  and editor-suggest registration. Deliberately no wider than the tool needs. */
-export interface TurnTrackerHost {
-  app: App;
+/** The slice of the plugin host the turn tracker depends on: the shared write funnel (`WriteHost`)
+ *  plus its settings and effect-history stores (owned by the host, persisted via `saveSettings`),
+ *  frontmatter access, and editor-suggest registration. Deliberately no wider than the tool needs. */
+export interface TurnTrackerHost extends WriteHost<TrackerState> {
   settings: OsrTurnTrackerSettings;
   effectHistory: EffectHistory;
   saveSettings(): Promise<void>;
-  applyToFile(
-    file: TFile,
-    sourceText: string,
-    range: BlockRange,
-    codec: BlockCodec<TrackerState>,
-    transform: Transform,
-    afterWrite?: (before: TrackerState, after: TrackerState) => void,
-  ): Promise<void>;
   frontmatterAt(path: string): Record<string, unknown> | undefined;
   registerEditorSuggest: Plugin["registerEditorSuggest"];
 }
@@ -127,7 +118,6 @@ class TurnTrackerTool {
         this.openNoteModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
       [commandIds.addEffect]: (editor) =>
         this.openEffectModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
-      [commandIds.insert]: (editor) => this.insertTracker(editor),
       ...Object.fromEntries(
         this.host.settings.advanceShortcuts.map((h) => [commandIds.advance(h), run(advanceHours(h))]),
       ),
@@ -143,6 +133,11 @@ class TurnTrackerTool {
     };
     return turnTrackerCommandSpecs(this.host.settings.advanceShortcuts, this.host.settings.presets).map(
       (spec) => {
+        // Insert is the entry-point command — a plain (always-listed) callback so it's reachable from
+        // the palette even in reading mode, not gated behind an active editor like the block actions.
+        if (spec.id === commandIds.insert) {
+          return { id: spec.id, name: spec.name, callback: () => this.insertTracker() };
+        }
         const editorCallback = actions[spec.id];
         if (!editorCallback) throw new Error(`Turn tracker command "${spec.id}" has no action.`);
         return { id: spec.id, name: spec.name, editorCallback };
@@ -150,8 +145,11 @@ class TurnTrackerTool {
     );
   }
 
-  /** Insert a fresh, self-contained tracker block at the cursor, pre-filled from note frontmatter. */
-  private insertTracker(editor: Editor): void {
+  /** Insert a fresh, self-contained tracker block at the active editor's cursor, pre-filled from note
+   *  frontmatter. Requires a note open in edit mode; notifies (rather than failing) if there isn't one. */
+  private insertTracker(): void {
+    const editor = requireActiveEditor(this.host.app, "insert a turn tracker");
+    if (!editor) return;
     const file = this.host.app.workspace.getActiveFile();
     const frontmatter = file ? this.host.frontmatterAt(file.path) : undefined;
     // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained; an

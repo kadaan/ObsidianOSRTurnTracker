@@ -2,6 +2,7 @@ import { App, Notice } from "obsidian";
 import { fenceBlock } from "../../core/block";
 import { RenderContext } from "../../core/tool";
 import { ConfirmModal } from "../../ui/confirm-modal";
+import { appendHotkeyHint } from "../../ui/hotkey-hint";
 import { iconChip } from "../../ui/icon-chip";
 import { inlineEdit } from "../../ui/inline-edit";
 import { openMenu } from "../../ui/menu";
@@ -16,6 +17,7 @@ import {
   setMax,
 } from "./actions";
 import { serializeChargeState } from "./codec";
+import { chargeCommandIds } from "./commands";
 import { CHARGE_LANG, ChargeTrackerState } from "./model";
 import { AddChargeItemModal } from "./modal";
 import { ChargeRow, computeChargePanel } from "./panel";
@@ -50,9 +52,10 @@ export function renderChargeTracker(ctx: RenderContext<ChargeTrackerState>, app:
   // Header: title on the left, Add item pushed to the far right; right-click for widget-level actions.
   const header = root.createDiv({ cls: "osr-charge-header" });
   header.createSpan({ cls: "osr-charge-title", text: "Charge Tracker" });
-  header
-    .createEl("button", { cls: "osr-charge-add", text: "Add item…" })
-    .addEventListener("click", openAdd);
+  const addButton = header.createEl("button", { cls: "osr-charge-add" });
+  // Quietly show the Add-item command's hotkey (when the user has assigned one), like the turn tracker.
+  appendHotkeyHint(addButton, "Add item…", ctx.hotkeyLabel(chargeCommandIds.addItem));
+  addButton.addEventListener("click", openAdd);
   header.addEventListener("contextmenu", (evt) => {
     if ((evt.target as HTMLElement).closest("button")) return; // leave the Add item button alone
     evt.preventDefault();

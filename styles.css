@@ -31,8 +31,9 @@
   flex: 1 1 auto;
 }
 
-/* Quiet hotkey hint trailing a button's label (only shown when a hotkey is assigned). */
-.osr-tt-hotkey {
+/* Quiet hotkey hint trailing a button's label (only shown when a hotkey is assigned). Shared by
+   both tools' buttons, so it's plugin-neutral rather than turn-tracker-prefixed. */
+.osr-hotkey {
   margin-left: 0.5em;
   font-size: 0.75em;
   color: var(--text-faint);
