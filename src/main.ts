@@ -1,18 +1,10 @@
 import {
-  AbstractInputSuggest,
   App,
-  ButtonComponent,
-  Editor,
-  EditorPosition,
-  EditorSuggest,
-  EditorSuggestContext,
-  EditorSuggestTriggerInfo,
   Hotkey,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownRenderer,
   MarkdownView,
-  Modal,
   Modifier,
   Notice,
   Platform,
@@ -23,56 +15,22 @@ import {
   TextComponent,
   TFile,
 } from "obsidian";
-import { commandIds, turnTrackerCommandSpecs } from "./tools/turn-tracker/commands";
-import { renderError, renderTracker } from "./tools/turn-tracker/render";
-import {
-  addEffect,
-  advanceHours,
-  clearAll,
-  clearExpired,
-  endTurn,
-  lightSource,
-  removeMarker,
-  renameMarker,
-  setRemaining,
-  pauseMarker,
-  resumeMarker,
-  addNote,
-  editNote,
-  removeNote,
-  toggleAt,
-} from "./tools/turn-tracker/actions";
-import { trackerCodec } from "./tools/turn-tracker/apply";
 import { applyAction } from "./core/apply";
-import { BlockCodec, NoteContext, RenderContext, ToolModule } from "./core/tool";
+import { BlockCodec, NoteContext } from "./core/tool";
+import { PluginTool } from "./host";
 import { createChargeTrackerTool } from "./tools/charge-tracker";
 import { ConfirmModal } from "./ui/confirm-modal";
-import { isValidDuration, rollDuration } from "./core/dice";
-import { BlockRange, findTrackerBlockAt, OPEN_FENCE } from "./tools/turn-tracker/block";
-import { fenceTrackerBlock } from "./tools/turn-tracker/serialize";
-import { seedTrackerState } from "./tools/turn-tracker/seed";
+import { BlockRange } from "./tools/turn-tracker/block";
 import {
-  CUSTOM_TYPE,
-  LEGACY_EFFECT_KEYS,
-  LightPreset,
-  nonEmptyString,
-  TOP_LEVEL_KEYS,
-  TRACKER_LANG,
-  TURNS_PER_DAY,
-  Transform,
-  TrackerState,
-  dayOf,
-} from "./tools/turn-tracker/model";
-import {
-  calendarError,
-  calendarNames,
-  currentDateAsStart,
-  defaultCalendarName,
-  isCalendariumAvailable,
-  makeFantasyDayHeader,
-  setCalendariumCurrentDate,
-  startDateError,
-} from "./tools/turn-tracker/calendarium";
+  EffectHistory,
+  effectHistoryView,
+  normalizeEffectHistory,
+} from "./tools/turn-tracker/effect-history";
+import { isCalendariumAvailable } from "./tools/turn-tracker/calendarium";
+import { PresetModal, presetIdFromLabel } from "./tools/turn-tracker/modals";
+import { LightPreset, nonEmptyString } from "./tools/turn-tracker/model";
+import { renderError } from "./tools/turn-tracker/render";
+import { createTurnTrackerTool, TurnTrackerHost } from "./tools/turn-tracker/tool";
 import {
   createDefaultSettings,
   DEFAULT_CALENDAR_PROPERTY,
@@ -110,32 +68,15 @@ function formatHotkey(hotkey: Hotkey): string {
   return Platform.isMacOS ? parts.join("") : parts.join("+");
 }
 
-/** An editor command a tool contributes. `id` is already tool-namespaced; the host registers it. */
-interface ToolCommand {
-  id: string;
-  name: string;
-  editorCallback: (editor: Editor) => void;
-}
-
-/**
- * A tool as the plugin host sees it: the portable `ToolModule` plus the Obsidian-integration hooks
- * (editor commands). These live here, not in `core/`, so `core/` stays free of Obsidian types.
- */
-interface PluginTool<S> extends ToolModule<S> {
-  commands?(): ToolCommand[];
-}
-
 export default class OsrTurnTrackerPlugin extends Plugin {
   settings: OsrTurnTrackerSettings = createDefaultSettings();
 
   /** Serializes writes so rapid clicks can't race on a stale block snapshot. */
   private applying = false;
 
-  /** Notify at most once per session when a block's calendar can't be resolved. */
-  private calendarWarned = false;
-
-  /** Per custom-effect-label usage: total count and a tally of the durations it was used with. */
-  private effectHistory: Record<string, EffectStat> = {};
+  /** Per custom-effect-label usage: total count and a tally of the durations it was used with.
+   *  Owned here (persisted in `data.json`); the turn-tracker tool reads and mutates it via the host. */
+  private effectHistory: EffectHistory = {};
 
   async onload() {
     // Validate each field against malformed/stale persisted data rather than trusting the shape.
@@ -161,54 +102,29 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     this.addSettingTab(new OsrSettingsTab(this.app, this));
 
     // Each tool renders its own code block through the shared host. Processors registered on the
-    // plugin are auto-detached on unload.
-    this.registerTool(this.createTurnTrackerTool());
+    // plugin are auto-detached on unload. The turn tracker depends on this plugin via a small host
+    // seam; the charge tracker needs only `app`.
+    const host: TurnTrackerHost = {
+      app: this.app,
+      settings: this.settings,
+      effectHistory: this.effectHistory,
+      saveSettings: () => this.saveSettings(),
+      applyToFile: (file, sourceText, range, codec, transform, afterWrite) =>
+        this.applyToFile(file, sourceText, range, codec, transform, afterWrite),
+      frontmatterAt: (path) => this.frontmatterAt(path),
+      registerEditorSuggest: this.registerEditorSuggest.bind(this),
+    };
+    this.registerTool(createTurnTrackerTool(host));
     this.registerTool(createChargeTrackerTool(this.app));
-
-    this.registerEditorSuggest(new TrackerSuggest(this.app, this));
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData({ ...this.settings, effectHistory: this.effectHistory });
   }
 
-  /** Custom effect labels, most-used first (alphabetical within equal counts). */
-  private frequentEffectLabels(): string[] {
-    return Object.keys(this.effectHistory).sort(
-      (a, b) => this.effectHistory[b].count - this.effectHistory[a].count || a.localeCompare(b),
-    );
-  }
-
-  /**
-   * The duration expression to pre-fill for a label, when it's unambiguous — the single one it's
-   * always been used with, or a strict most-common one. May be dice (e.g. "2d6+1"), which re-rolls
-   * on submit. Returns undefined when there's no clear winner.
-   */
-  private durationFor(label: string): string | undefined {
-    const durations = this.effectHistory[label]?.durations;
-    if (!durations) return undefined;
-    const ranked = Object.entries(durations).sort((a, b) => b[1] - a[1]);
-    if (ranked.length === 0) return undefined;
-    if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return undefined; // tie → not clear
-    return ranked[0][0];
-  }
-
-  /** Bump a label's usage so it surfaces higher in suggestions and learns its typical duration. */
-  private recordEffect(label: string, duration: string): void {
-    const stat = this.effectHistory[label] ?? { count: 0, durations: {} };
-    stat.count += 1;
-    stat.durations[duration] = (stat.durations[duration] ?? 0) + 1;
-    this.effectHistory[label] = stat;
-    void this.saveSettings();
-  }
-
   /** Recorded custom-effect labels with their usage (most-used first), for the settings view. */
   effectHistoryView(): { label: string; count: number; durations: [string, number][] }[] {
-    return this.frequentEffectLabels().map((label) => ({
-      label,
-      count: this.effectHistory[label].count,
-      durations: Object.entries(this.effectHistory[label].durations),
-    }));
+    return effectHistoryView(this.effectHistory);
   }
 
   /** Forget a recorded custom-effect label so it no longer suggests or pre-fills a duration. */
@@ -217,9 +133,10 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  /** Forget every recorded custom-effect label. */
+  /** Forget every recorded custom-effect label. Cleared in place so the tool's shared reference to
+   *  the store stays valid. */
   async forgetAllEffects(): Promise<void> {
-    this.effectHistory = {};
+    for (const key of Object.keys(this.effectHistory)) delete this.effectHistory[key];
     await this.saveSettings();
   }
 
@@ -264,123 +181,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     });
   }
 
-  /** The turn tracker as a self-contained tool: codec, frontmatter resolution, widget, and commands. */
-  private createTurnTrackerTool(): PluginTool<TrackerState> {
-    return {
-      id: TRACKER_LANG,
-      lang: TRACKER_LANG,
-      displayName: "Turn tracker",
-      codec: trackerCodec,
-      afterWrite: this.syncCalendarDay,
-      commands: () => this.turnTrackerCommands(),
-      prepare: (state, note, backfill) => {
-        // Resolve the effective calendar/start: the block's own values (authoritative once written),
-        // then note frontmatter (fills a block that still lacks its own value, so a corrected
-        // frontmatter reloads it), then Calendarium's default calendar / current date.
-        const resolved = this.resolveState(state, note.frontmatter);
-        // A typo'd calendar name or an unparseable start fails loudly rather than silently defaulting.
-        const calErr =
-          calendarError(resolved.calendar) ?? startDateError(resolved.calendar, resolved.start);
-        if (calErr) return { error: calErr };
-        // Anchor a block missing calendar/start by persisting the resolved values (the host skips the
-        // write while the file is open in an editor, to avoid racing its buffer).
-        if ((resolved.calendar && !state.calendar) || (resolved.start && !state.start)) {
-          backfill((s) => this.fillMissing(s, resolved, false));
-        }
-        return { state: { ...state, calendar: resolved.calendar, start: resolved.start } };
-      },
-      render: (ctx) => this.renderTrackerWidget(ctx),
-    };
-  }
-
-  /** The turn tracker's editor commands: each spec (from the shared builder) paired with the editor
-   *  action for its id. Dynamic commands (advance shortcuts, light presets) are read from settings at
-   *  load; changing the lists takes effect on reload. */
-  private turnTrackerCommands(): ToolCommand[] {
-    const run = (transform: Transform) => (editor: Editor) =>
-      void this.mutateFromEditor(editor, transform);
-    const actions: Record<string, (editor: Editor) => void> = {
-      [commandIds.endTurn]: run(endTurn),
-      [commandIds.clearExpired]: run(clearExpired),
-      [commandIds.clearAll]: run(clearAll),
-      [commandIds.addNote]: (editor) =>
-        this.openNoteModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
-      [commandIds.addEffect]: (editor) =>
-        this.openEffectModal(undefined, (t) => void this.mutateFromEditor(editor, t)),
-      [commandIds.insert]: (editor) => this.insertTracker(editor),
-      ...Object.fromEntries(
-        this.settings.advanceShortcuts.map((h) => [commandIds.advance(h), run(advanceHours(h))]),
-      ),
-      ...Object.fromEntries(
-        this.settings.presets.map((preset) => [
-          commandIds.light(preset.id),
-          (editor: Editor) => {
-            const transform = this.lightTransform(preset.id);
-            if (transform) void this.mutateFromEditor(editor, transform);
-          },
-        ]),
-      ),
-    };
-    return turnTrackerCommandSpecs(this.settings.advanceShortcuts, this.settings.presets).map(
-      (spec) => {
-        const editorCallback = actions[spec.id];
-        if (!editorCallback) throw new Error(`Turn tracker command "${spec.id}" has no action.`);
-        return { id: spec.id, name: spec.name, editorCallback };
-      },
-    );
-  }
-
-  /** Insert a fresh, self-contained tracker block at the cursor, pre-filled from note frontmatter. */
-  private insertTracker(editor: Editor): void {
-    const file = this.app.workspace.getActiveFile();
-    const frontmatter = file ? this.frontmatterAt(file.path) : undefined;
-    // Pre-fill valid calendar/start here (a safe editor write) so the block is self-contained; an
-    // invalid frontmatter value is left out and surfaces as an error on render.
-    const base: TrackerState = { position: 0, markers: [] };
-    const state = this.fillMissing(base, this.resolveState(base, frontmatter), true);
-    editor.replaceSelection(`${fenceTrackerBlock(state)}\n`);
-  }
-
-  /** Build the tracker widget's handlers from the generic `mutate` bridge and render it. */
-  private renderTrackerWidget(ctx: RenderContext<TrackerState>): void {
-    // Fill the block's missing calendar/start (from live frontmatter) on each user action, so the
-    // first write anchors them. Reads frontmatter fresh at click time, not at render time.
-    const mutate = (transform: Transform): void =>
-      ctx.mutate(this.withResolvedDefaults(transform, this.frontmatterAt(ctx.sourcePath)));
-    renderTracker(
-      ctx.container,
-      ctx.state,
-      this.settings,
-      {
-        onEndTurn: () => mutate(endTurn),
-        onAdvanceHours: (hours) => mutate(advanceHours(hours)),
-        onBoxClick: (turn) => mutate(toggleAt(turn)),
-        onLight: (presetId, startsAt) => {
-          const transform = this.lightTransform(presetId, startsAt);
-          if (transform) mutate(transform);
-        },
-        onAddEffect: (startsAt) => this.openEffectModal(startsAt, mutate),
-        onClearExpired: () => mutate(clearExpired),
-        onClearAll: () => mutate(clearAll),
-        onRemoveMarker: (index, label) =>
-          new ConfirmModal(this.app, `Remove "${label}"?`, () => mutate(removeMarker(index))).open(),
-        onRenameMarker: (index, name) => mutate(renameMarker(index, name)),
-        onPause: (index) => mutate(pauseMarker(index)),
-        onResume: (index) => mutate(resumeMarker(index)),
-        onSetRemaining: (index, turns) => mutate(setRemaining(index, turns)),
-        onCopyState: () => void this.copyState(ctx.state),
-        onAddNote: (at) => this.openNoteModal(at, mutate),
-        onEditNote: (index, text) =>
-          new NoteModal(this.app, text, (next) => mutate(editNote(index, next))).open(),
-        onDeleteNote: (index) =>
-          new ConfirmModal(this.app, "Delete this note?", () => mutate(removeNote(index))).open(),
-        hotkey: (commandId) => ctx.hotkeyLabel(commandId),
-      },
-      makeFantasyDayHeader(ctx.state, () => this.warnCalendar()),
-      ctx.renderMarkdown,
-    );
-  }
-
   /** Locate the file + block range for a rendered widget. `info.text`/line numbers are a consistent
    *  snapshot from getSectionInfo; undefined when the block can't be resolved (e.g. transient render). */
   private locateBlock(
@@ -397,40 +197,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
    *  through, so every block reads its note context one consistent way. */
   private frontmatterAt(path: string): Record<string, unknown> | undefined {
     return this.app.metadataCache.getCache(path)?.frontmatter;
-  }
-
-  /** Roll a preset's duration and build the transform that lights it, or return undefined (after a
-   *  notice) when the duration is invalid. Shared by the widget button and the light hotkey command. */
-  private lightTransform(presetId: string, startsAt?: number): Transform | undefined {
-    const preset = this.settings.presets.find((p) => p.id === presetId);
-    if (!preset) return undefined;
-    // Roll the preset's duration expression now, so the marker gets a fixed span.
-    const roll = rollDuration(preset.turns);
-    if (!roll || roll.total < 1) {
-      new Notice(`"${preset.label}" has an invalid duration (${preset.turns}).`);
-      return undefined;
-    }
-    if (roll.rolled) new Notice(`${preset.label} — rolled ${roll.expr}: ${roll.total} turn(s).`);
-    return lightSource(presetId, roll.total, startsAt);
-  }
-
-  /** Open the "add note" modal, committing the resulting transform via `commit` (from the widget or
-   *  the editor command). `at` is the anchored turn, or undefined for the current turn. */
-  private openNoteModal(at: number | undefined, commit: (transform: Transform) => void): void {
-    new NoteModal(this.app, "", (text) => commit(addNote(text, at))).open();
-  }
-
-  /** Open the "add effect" modal, committing the resulting transform via `commit` and recording the
-   *  effect for autocomplete. Shared by the widget button and the effect hotkey command. */
-  private openEffectModal(startsAt: number | undefined, commit: (transform: Transform) => void): void {
-    new EffectModal(
-      this.app,
-      { labels: this.frequentEffectLabels(), durationFor: (l) => this.durationFor(l) },
-      (label, turns, duration) => {
-        commit(addEffect(label, turns, startsAt));
-        this.recordEffect(label, duration);
-      },
-    ).open();
   }
 
   /** The formatted hotkey a user has assigned to `commandId` (relative to this plugin), or undefined
@@ -460,45 +226,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     void this.applyToFile(located.file, located.text, located.range, codec, transform, afterWrite);
   }
 
-  /** The effective calendar/start for a block, in precedence order: the block's own values, then the
-   *  note's frontmatter, then Calendarium's default calendar / current date. The block wins, so once a
-   *  valid value is serialized it's authoritative; a value only comes from frontmatter while the block
-   *  still lacks its own (which is how a corrected frontmatter reloads a block whose invalid value was
-   *  never written). */
-  private resolveState(
-    state: TrackerState,
-    frontmatter: Record<string, unknown> | undefined,
-  ): { calendar?: string; start?: string } {
-    const seeded = seedTrackerState(frontmatter, {
-      calendarProperty: this.settings.calendarProperty,
-      startProperty: this.settings.startProperty,
-    });
-    const calendar = state.calendar ?? seeded.calendar ?? defaultCalendarName();
-    const start = state.start ?? seeded.start ?? (calendar ? currentDateAsStart(calendar) : undefined);
-    return { calendar, start };
-  }
-
-  /** Return `state` with any missing calendar/start filled from `resolved` (never overwriting the
-   *  block's own values). When `validate`, an invalid resolved value is skipped so it's never
-   *  serialized — the block stays gap-filled from frontmatter each render until it's corrected. */
-  private fillMissing(
-    state: TrackerState,
-    resolved: { calendar?: string; start?: string },
-    validate: boolean,
-  ): TrackerState {
-    const calOk =
-      resolved.calendar && !state.calendar && (!validate || !calendarError(resolved.calendar));
-    const startOk =
-      resolved.start &&
-      !state.start &&
-      (!validate || !startDateError(resolved.calendar, resolved.start));
-    return {
-      ...state,
-      ...(calOk ? { calendar: resolved.calendar } : {}),
-      ...(startOk ? { start: resolved.start } : {}),
-    };
-  }
-
   /** Whether `path` is open in a source/live-preview editor, where writing to disk would race an
    *  unsaved buffer and duplicate content. Reading-only views are safe to persist under. */
   private isFileBeingEdited(path: string): boolean {
@@ -521,38 +248,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     const located = this.locateBlock(el, ctx);
     if (!located) return;
     void this.applyToFile(located.file, located.text, located.range, codec, transform);
-  }
-
-  /** Wrap a transform so it first fills the block's missing calendar/start with resolved, *valid*
-   *  values. This persists them on the user's action (a safe write) rather than during render, and
-   *  never serializes an invalid value — the block stays gap-filled from frontmatter each render
-   *  until it's corrected. */
-  private withResolvedDefaults(
-    transform: Transform,
-    frontmatter: Record<string, unknown> | undefined,
-  ): Transform {
-    return (s) => transform(this.fillMissing(s, this.resolveState(s, frontmatter), true));
-  }
-
-  /** Write path for the command: block located relative to the editor cursor. */
-  private async mutateFromEditor(editor: Editor, transform: Transform): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) return;
-    const text = editor.getValue();
-    const range = findTrackerBlockAt(text, editor.getCursor().line);
-    if (!range) {
-      new Notice("Place the cursor in a turn-tracker block.");
-      return;
-    }
-    const frontmatter = this.frontmatterAt(file.path);
-    await this.applyToFile(
-      file,
-      text,
-      range,
-      trackerCodec,
-      this.withResolvedDefaults(transform, frontmatter),
-      this.syncCalendarDay,
-    );
   }
 
   /** Tool-neutral write funnel: apply a transform to a block via its codec, write once, then run the
@@ -578,517 +273,6 @@ export default class OsrTurnTrackerPlugin extends Plugin {
     } finally {
       this.applying = false;
     }
-  }
-
-  /** Turn-tracker post-write side effect: push the new in-game day into Calendarium when an action
-   *  crossed a day boundary. Passed to the write funnel so the funnel itself stays tool-neutral. */
-  private syncCalendarDay = (before: TrackerState, after: TrackerState): void => {
-    if (this.settings.syncCalendariumDate && dayOf(after.position) !== dayOf(before.position)) {
-      setCalendariumCurrentDate(after);
-    }
-  };
-
-  private warnCalendar(): void {
-    if (this.calendarWarned) return;
-    this.calendarWarned = true;
-    new Notice("OSR Turn Tracker: couldn't read the Calendarium calendar — using default dates.");
-  }
-
-  /** Copy the tracker as a `turn-tracker` code block, ready to paste into another note. */
-  private async copyState(state: TrackerState): Promise<void> {
-    // Stamp the render origin at the current day's start so a pasted clone doesn't replay prior days,
-    // and drop spent markers so the clone starts clean.
-    const origin = dayOf(state.position) * TURNS_PER_DAY;
-    const pruned = clearExpired(state);
-    // Keep only notes at or after the current turn (past notes belong to the finished session).
-    const notes = pruned.notes?.filter((n) => n.at >= state.position);
-    try {
-      await navigator.clipboard.writeText(fenceTrackerBlock({ ...pruned, origin, notes }));
-      new Notice("Tracker state copied to clipboard.");
-    } catch {
-      new Notice("OSR Turn Tracker: couldn't access the clipboard.");
-    }
-  }
-}
-
-type TrackerSuggestion = { display: string; hint: string; insert: string };
-type Section = "top" | "effects" | "notes";
-type ListSection = Exclude<Section, "top">;
-
-/** Per-list-section data: the entry keys, the value that starts an entry, and the "new entry" label. */
-const SECTION_ENTRIES: Record<ListSection, { keys: string[]; scaffold: string; newLabel: string }> = {
-  effects: {
-    keys: ["type", "label", "startsAt", "duration", "pauses"],
-    scaffold: "type: ",
-    newLabel: "- type: … (new effect)",
-  },
-  notes: { keys: ["at", "text"], scaffold: "at: ", newLabel: "- at: … (new note)" },
-};
-
-const EFFECT_SECTION_KEYS = new Set<string>(["effects", ...LEGACY_EFFECT_KEYS]);
-
-/** The section a column-0 `key:` opens. */
-function sectionFor(key: string): Section {
-  if (EFFECT_SECTION_KEYS.has(key)) return "effects";
-  if (key === "notes") return "notes";
-  return "top";
-}
-
-const FENCE_LINE = /^`{3,}/;
-const TYPE_VALUE_RE = /^\s*(?:-\s*)?type:\s*(\S*)$/;
-// The `calendar:` value can contain spaces (e.g. "Calendar of Greyhawk"), so capture the whole rest.
-const CALENDAR_VALUE_RE = /^calendar:\s*(.*)$/;
-// An optional indent, an optional list dash, a partial word. A line with a colon never matches, so a
-// completed `key:` doesn't re-trigger (and neither does mid-sentence prose).
-const STRUCTURE_RE = /^(\s*)(-\s*)?([A-Za-z]*)$/;
-
-/**
- * Autocomplete while hand-editing a `turn-tracker` fence — the one place the interactive widget
- * isn't shown. It is section-aware: top-level keys at column 0, a `- type:`/`- at:` scaffold and
- * entry keys inside `effects:`/`notes:`, the preset ids (plus `custom`) on a `type:` value, and the
- * installed Calendarium calendars on a `calendar:` value.
- */
-class TrackerSuggest extends EditorSuggest<TrackerSuggestion> {
-  // Context captured in onTrigger, consumed in getSuggestions.
-  private mode: "type" | "calendar" | "structure" = "structure";
-  private section: Section = "top";
-  private indented = false;
-  private hasDash = false;
-
-  constructor(
-    app: App,
-    private readonly plugin: OsrTurnTrackerPlugin,
-  ) {
-    super(app);
-  }
-
-  onTrigger(cursor: EditorPosition, editor: Editor): EditorSuggestTriggerInfo | null {
-    const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-    // Cheap per-line rejection before the buffer scan: a `type:`/`calendar:` value or a key/list anchor.
-    const typeMatch = before.match(TYPE_VALUE_RE);
-    const calendarMatch = typeMatch ? null : before.match(CALENDAR_VALUE_RE);
-    const structMatch = typeMatch || calendarMatch ? null : before.match(STRUCTURE_RE);
-    if (!typeMatch && !calendarMatch && !structMatch) return null;
-
-    const { inside, section } = this.scanUp(editor, cursor.line);
-    if (!inside) return null;
-
-    if (typeMatch || calendarMatch) {
-      this.mode = typeMatch ? "type" : "calendar";
-      const value = (typeMatch ?? calendarMatch)![1];
-      return { start: { line: cursor.line, ch: cursor.ch - value.length }, end: cursor, query: value };
-    }
-
-    const [, indent, dash, word] = structMatch!;
-    // Stay quiet on empty top-level lines; in a list section, offer help even on a blank line.
-    if (word.length === 0 && section === "top") return null;
-
-    this.mode = "structure";
-    this.section = section;
-    this.indented = indent.length > 0;
-    this.hasDash = !!dash;
-    return { start: { line: cursor.line, ch: cursor.ch - word.length }, end: cursor, query: word };
-  }
-
-  getSuggestions(context: EditorSuggestContext): TrackerSuggestion[] {
-    const q = context.query.toLowerCase();
-    // Both value modes append a trailing space to terminate the value, so selecting it doesn't
-    // immediately re-fire the same trigger and leave the popup stuck open.
-    if (this.mode === "type") {
-      return [...this.plugin.settings.presets.map((p) => p.id), CUSTOM_TYPE]
-        .filter((id) => id.toLowerCase().startsWith(q))
-        .map((id) => ({
-          display: id,
-          hint: id === CUSTOM_TYPE ? "free-text effect" : "preset",
-          insert: `${id} `,
-        }));
-    }
-    if (this.mode === "calendar") {
-      return calendarNames()
-        .filter((name) => name.toLowerCase().startsWith(q))
-        .map((name) => ({ display: name, hint: "calendar", insert: `${name} ` }));
-    }
-
-    const out: TrackerSuggestion[] = [];
-    const col0 = !this.indented && !this.hasDash;
-    const entry = this.section === "top" ? undefined : SECTION_ENTRIES[this.section];
-
-    // Start a new list entry — only when not already mid-entry (no dash) and not typing a key name.
-    if (entry && context.query === "" && !this.hasDash) {
-      out.push({ display: entry.newLabel, hint: "new entry", insert: `${col0 ? "  - " : "- "}${entry.scaffold}` });
-    }
-    // Keys of the current entry (on a dashed or indented line within a list section).
-    if (entry && (this.hasDash || this.indented)) {
-      for (const key of entry.keys) {
-        if (key.toLowerCase().startsWith(q)) out.push({ display: `${key}:`, hint: "", insert: `${key}: ` });
-      }
-    }
-    // Top-level keys when writing at column 0.
-    if (col0) {
-      for (const key of TOP_LEVEL_KEYS) {
-        if (key.startsWith(q)) out.push({ display: `${key}:`, hint: "", insert: `${key}: ` });
-      }
-    }
-    return out;
-  }
-
-  renderSuggestion(value: TrackerSuggestion, el: HTMLElement): void {
-    el.createSpan({ text: value.display });
-    if (value.hint) el.createSpan({ cls: "osr-tt-suggest-hint", text: value.hint });
-  }
-
-  selectSuggestion(value: TrackerSuggestion): void {
-    const ctx = this.context;
-    if (!ctx) return;
-    ctx.editor.replaceRange(value.insert, ctx.start, ctx.end);
-    ctx.editor.setCursor({ line: ctx.start.line, ch: ctx.start.ch + value.insert.length });
-  }
-
-  /**
-   * One upward pass answering both questions onTrigger needs: is the cursor inside a turn-tracker
-   * fence, and which section is it in (from the nearest column-0 key). The nearest fence above bounds
-   * the search — the cursor is "inside" only if that fence opens a turn-tracker block.
-   */
-  private scanUp(editor: Editor, line: number): { inside: boolean; section: Section } {
-    let section: Section = "top";
-    let sectionKnown = false;
-    for (let i = line - 1; i >= 0; i--) {
-      const text = editor.getLine(i);
-      const trimmed = text.trim();
-      if (FENCE_LINE.test(trimmed)) return { inside: OPEN_FENCE.test(trimmed), section };
-      if (!sectionKnown) {
-        const m = text.match(/^([A-Za-z]+):/); // a column-0 key sets the enclosing section
-        if (m) {
-          section = sectionFor(m[1]);
-          sectionKnown = true;
-        }
-      }
-    }
-    return { inside: false, section: "top" };
-  }
-}
-
-/** Prompts for a note's free-form text (empty = new note, otherwise editing), then invokes `onSubmit`. */
-class NoteModal extends Modal {
-  private text: string;
-  private saveButton?: ButtonComponent;
-
-  constructor(
-    app: App,
-    initial: string,
-    private readonly onSubmit: (text: string) => void,
-  ) {
-    super(app);
-    this.text = initial;
-  }
-
-  onOpen(): void {
-    this.contentEl.createEl("h3", { text: this.text ? "Edit note" : "Add note" });
-    const input = this.contentEl.createEl("textarea", { cls: "osr-tt-note-input" });
-    input.rows = 4;
-    input.value = this.text;
-    input.addEventListener("input", () => {
-      this.text = input.value;
-      this.refresh();
-    });
-    this.contentEl.createEl("div", { text: "Markdown is supported.", cls: "osr-tt-note-help" });
-    new Setting(this.contentEl).addButton((b) => {
-      this.saveButton = b;
-      b.setButtonText("Save").setCta().onClick(() => this.submit());
-    });
-    // Cmd/Ctrl+Enter saves (plain Enter inserts a newline in the textarea); no-op when empty.
-    this.scope.register(["Mod"], "Enter", () => {
-      if (this.canSubmit()) this.submit();
-      return false;
-    });
-    this.refresh();
-    input.focus();
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-
-  /** Save is enabled only once the trimmed text is non-empty. */
-  private canSubmit(): boolean {
-    return this.text.trim().length > 0;
-  }
-
-  private refresh(): void {
-    this.saveButton?.setDisabled(!this.canSubmit());
-  }
-
-  private submit(): void {
-    if (!this.canSubmit()) return;
-    this.onSubmit(this.text.trim());
-    this.close();
-  }
-}
-
-/** Usage stats for one custom effect label: how often, and with which duration expressions. */
-interface EffectStat {
-  /** Total uses. Stored (not derived from `durations`) so legacy entries migrated from the old
-   *  count-only format keep their suggestion ranking despite having no recorded durations. */
-  count: number;
-  /** Tally of the duration expressions used (plain numbers or dice like "2d6+1") → times seen. */
-  durations: Record<string, number>;
-}
-
-/** What the Add-effect modal needs from history: ranked labels and a per-label duration hint. */
-interface EffectHistoryView {
-  labels: string[];
-  durationFor: (label: string) => string | undefined;
-}
-
-/** Coerce persisted history to the current shape, migrating the legacy `label → count` form. */
-function normalizeEffectHistory(raw: unknown): Record<string, EffectStat> {
-  if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, EffectStat> = {};
-  for (const [label, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "number") out[label] = { count: value, durations: {} };
-    else if (value && typeof value === "object") {
-      const stat = value as { count?: unknown; durations?: unknown };
-      const durations: Record<string, number> = {};
-      if (stat.durations && typeof stat.durations === "object") {
-        for (const [d, c] of Object.entries(stat.durations)) {
-          if (typeof c === "number") durations[d] = c;
-        }
-      }
-      out[label] = { count: typeof stat.count === "number" ? stat.count : 0, durations };
-    }
-  }
-  return out;
-}
-
-/** Suggests previously-used effect labels (most-used first) as the user types. */
-class EffectLabelSuggest extends AbstractInputSuggest<string> {
-  constructor(
-    app: App,
-    inputEl: HTMLInputElement,
-    private readonly labels: string[],
-  ) {
-    super(app, inputEl);
-  }
-
-  protected getSuggestions(query: string): string[] {
-    if (!query) return []; // don't pop the list open on focus, only once the user types
-    const q = query.toLowerCase();
-    return this.labels.filter((label) => label.toLowerCase().includes(q));
-  }
-
-  renderSuggestion(label: string, el: HTMLElement): void {
-    el.setText(label);
-  }
-}
-
-/** Prompts for an ad-hoc effect's label and duration, then invokes `onSubmit`. */
-class EffectModal extends Modal {
-  private label = "";
-  private duration = "1";
-  private addButton?: ButtonComponent;
-
-  constructor(
-    app: App,
-    private readonly history: EffectHistoryView,
-    private readonly onSubmit: (label: string, turns: number, duration: string) => void,
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.contentEl.addClass("osr-tt-effect-modal");
-    this.contentEl.createEl("h3", { text: "Add effect" });
-
-    let durationField: TextComponent;
-    let durationTouched = false;
-    // Pre-fill the duration for a known label, unless the user has already set one by hand.
-    const fillDuration = (label: string) => {
-      if (durationTouched) return;
-      const duration = this.history.durationFor(label);
-      if (duration === undefined) return;
-      this.duration = duration;
-      durationField.setValue(this.duration); // setValue doesn't fire onChange, so it stays "untouched"
-    };
-
-    new Setting(this.contentEl).setName("Label").addText((t) => {
-      t.setPlaceholder("e.g. Poison").onChange((v) => {
-        this.label = v.trim();
-        fillDuration(this.label);
-        this.refresh();
-      });
-      const suggest = new EffectLabelSuggest(this.app, t.inputEl, this.history.labels);
-      suggest.onSelect((label) => {
-        t.setValue(label);
-        this.label = label;
-        fillDuration(label);
-        this.refresh();
-        suggest.close();
-      });
-    });
-    new Setting(this.contentEl)
-      .setName("Duration (turns)")
-      .setDesc("A number, or dice rolled now — e.g. 6 or 2d6+1.")
-      .addText((t) => {
-        durationField = t;
-        t.setPlaceholder("e.g. 6 or 2d6+1").setValue(this.duration).onChange((v) => {
-          this.duration = v;
-          durationTouched = true;
-          this.refresh();
-        });
-      });
-    new Setting(this.contentEl).addButton((b) => {
-      this.addButton = b;
-      b.setButtonText("Add").setCta().onClick(() => this.submit());
-    });
-
-    // Cmd/Ctrl+Enter adds, matching the Add button's enabled state.
-    this.scope.register(["Mod"], "Enter", () => {
-      if (this.canSubmit()) this.submit();
-      return false;
-    });
-
-    this.refresh();
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-
-  /** Add is enabled only once there's a label and a parseable duration. */
-  private canSubmit(): boolean {
-    return Boolean(this.label && isValidDuration(this.duration));
-  }
-
-  private refresh(): void {
-    this.addButton?.setDisabled(!this.canSubmit());
-  }
-
-  private submit(): void {
-    const roll = rollDuration(this.duration);
-    if (!roll) return; // guarded by the disabled button; defensive
-    if (roll.total < 1) {
-      // A 0 is a valid outcome (e.g. 1d3-1 poison that never took) — a zero-length marker would be
-      // instantly expired, so skip adding it, but close the dialog rather than force a reroll.
-      new Notice(`${this.label} — rolled ${roll.expr}: ${roll.total}, effect not added.`);
-      this.close();
-      return;
-    }
-    if (roll.rolled) new Notice(`${this.label} — rolled ${roll.expr}: ${roll.total} turn(s).`);
-    this.onSubmit(this.label, roll.total, roll.expr);
-    this.close();
-  }
-}
-
-/** Derive a stable, readable preset id from its label ("Cure Light" → "cure-light") so it serializes
- *  as a meaningful marker `type` instead of an opaque random id. Disambiguated against ids in use. */
-function presetIdFromLabel(label: string, existingIds: string[]): string {
-  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "preset";
-  if (!existingIds.includes(base)) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`;
-    if (!existingIds.includes(candidate)) return candidate;
-  }
-}
-
-/** Edits a light preset's fields (name, icon, duration, pausable) in a modal, then invokes `onSubmit`. */
-class PresetModal extends Modal {
-  private readonly draft: LightPreset;
-  private saveButton?: ButtonComponent;
-
-  constructor(
-    app: App,
-    private readonly title: string,
-    preset: LightPreset,
-    /** Names already used by other presets (lowercased) — the new name must not collide. */
-    private readonly takenNames: string[],
-    private readonly onSubmit: (preset: LightPreset) => void,
-  ) {
-    super(app);
-    this.draft = { ...preset }; // edit a copy; apply only on Save
-  }
-
-  onOpen(): void {
-    this.contentEl.createEl("h3", { text: this.title });
-
-    new Setting(this.contentEl).setName("Name").addText((t) =>
-      t.setValue(this.draft.label).onChange((v) => {
-        this.draft.label = v.trim();
-        this.refresh();
-      }),
-    );
-
-    // Icon field with a live preview: an invalid Lucide name shows as an empty box.
-    let previewEl: HTMLElement;
-    const renderPreview = (name: string) => {
-      previewEl.empty();
-      if (name) setIcon(previewEl, name);
-    };
-    const iconSetting = new Setting(this.contentEl)
-      .setName("Icon")
-      .setDesc("Optional Lucide icon name shown beside the preset in menus.")
-      .addText((t) =>
-        t
-          .setPlaceholder("e.g. lightbulb")
-          .setValue(this.draft.icon ?? "")
-          .onChange((v) => {
-            const icon = v.trim();
-            if (icon) this.draft.icon = icon;
-            else delete this.draft.icon;
-            renderPreview(icon);
-          }),
-      );
-    previewEl = iconSetting.controlEl.createSpan({ cls: "osr-tt-preset-icon-preview" });
-    renderPreview(this.draft.icon ?? "");
-
-    new Setting(this.contentEl)
-      .setName("Duration (turns)")
-      .setDesc("A number, or dice rolled when lit — e.g. 6 or 2d6+1.")
-      .addText((t) =>
-        t
-          .setPlaceholder("e.g. 6 or 2d6+1")
-          .setValue(this.draft.turns)
-          .onChange((v) => {
-            this.draft.turns = v;
-            this.refresh();
-          }),
-      );
-
-    new Setting(this.contentEl)
-      .setName("Pausable")
-      .setDesc("Can be paused and resumed on the tracker (like a light source).")
-      .addToggle((t) =>
-        t.setValue(this.draft.pausable ?? false).onChange((v) => (this.draft.pausable = v)),
-      );
-
-    new Setting(this.contentEl).addButton((b) => {
-      this.saveButton = b;
-      b.setButtonText("Save").setCta().onClick(() => this.submit());
-    });
-
-    this.refresh();
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-
-  /** Enable Save only with a non-empty, unique name and a parseable duration. */
-  private refresh(): void {
-    this.saveButton?.setDisabled(!this.isValid());
-  }
-
-  private isValid(): boolean {
-    if (!this.draft.label) return false;
-    if (this.takenNames.includes(this.draft.label.toLowerCase())) return false;
-    return isValidDuration(this.draft.turns);
-  }
-
-  private submit(): void {
-    if (!this.isValid()) return;
-    const roll = rollDuration(this.draft.turns);
-    if (roll) this.draft.turns = roll.expr; // store the canonical expression
-    this.onSubmit(this.draft);
-    this.close();
   }
 }
 

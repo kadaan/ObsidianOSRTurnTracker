@@ -124,19 +124,22 @@ subsystem (`recordEffect`/`durationFor`/`effectHistoryView`/`forget*`/
 
 ### Acceptance criteria
 
-- [ ] `TurnTrackerHost` is defined and captures exactly what the tool needs (no wider
-      plugin surface leaked in).
-- [ ] The turn-tracker glue, modals, and `TrackerSuggest` live under
-      `tools/turn-tracker/`; `main.ts` no longer references `TrackerState` internals
-      directly.
-- [ ] `main.ts` registers the turn tracker via `createTurnTrackerTool(host)`, symmetric
+- [x] `TurnTrackerHost` is defined and captures exactly what the tool needs (no wider
+      plugin surface leaked in) — 7 members; `hotkeyLabel` dropped (reaches the tool via
+      `RenderContext`).
+- [x] The turn-tracker glue, modals, and `TrackerSuggest` live under
+      `tools/turn-tracker/` (`tool.ts`, `modals.ts`, `suggest.ts`, `effect-history.ts`);
+      `main.ts` no longer references `TrackerState` internals directly.
+- [x] `main.ts` registers the turn tracker via `createTurnTrackerTool(host)`, symmetric
       with `createChargeTrackerTool(app)`.
-- [ ] Effect history still persists to the same `data.json` key and reloads unchanged.
-- [ ] The write funnel's re-entrancy guard (`applying`) and click-time block location are
-      unchanged (still host-owned).
-- [ ] `npx tsc --noEmit` clean, 198 tests pass, `npm run build` succeeds; manual smoke
-      test in the vault confirms render, commands, modals, autocomplete, and Calendarium
-      sync all behave as before.
+- [x] Effect history still persists to the same `data.json` `effectHistory` key
+      (unchanged `saveSettings`) and reloads via `normalizeEffectHistory`.
+- [x] The write funnel's re-entrancy guard (`applying`) and click-time block location
+      (`locateBlock`) are unchanged (still host-owned in `main.ts`).
+- [x] `npx tsc --noEmit` clean, tests pass (219: +5 for the new source files under the
+      recursive hygiene scan), `npm run build` succeeds. **Manual vault smoke test pending
+      user verification** — render, commands, modals, autocomplete, Calendarium sync
+      (Obsidian runtime can't be exercised here).
 
 ---
 
