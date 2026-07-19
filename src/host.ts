@@ -13,8 +13,10 @@ export interface ToolCommand {
 
 /**
  * A tool as the plugin host sees it: the portable `ToolModule` plus the Obsidian-integration hooks
- * (editor commands).
+ * (editor commands, a settings section).
  */
 export interface PluginTool<S> extends ToolModule<S> {
   commands?(): ToolCommand[];
+  /** Render this tool's settings into the shared settings tab (the host owns only the shell). */
+  settingsSection?(containerEl: HTMLElement): void;
 }

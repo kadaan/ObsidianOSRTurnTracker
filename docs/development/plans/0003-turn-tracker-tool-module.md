@@ -160,13 +160,17 @@ shell that iterates registered tools and calls each one's `settingsSection`.
 
 ### Acceptance criteria
 
-- [ ] The tool contract exposes an optional `settingsSection(containerEl)`.
-- [ ] The turn tracker's settings render from its own `settingsSection`; the settings
-      pane looks identical (same "Turn Tracker" parent heading + nested group).
-- [ ] `main.ts`'s settings tab contains no turn-tracker-specific rows — only the shell
-      that delegates to each tool.
-- [ ] `npx tsc --noEmit` clean, 198 tests pass, `npm run build` succeeds; manual smoke
-      test confirms every settings control still reads/writes and persists.
+- [x] The tool contract exposes an optional `settingsSection(containerEl)` (on
+      `PluginTool`, beside `commands()`).
+- [x] The turn tracker's settings render from its own `settingsSection`
+      (`TurnTrackerSettingsSection`); the pane is identical — same "Turn Tracker" heading
+      + nested `osr-settings-group`, self-refreshing its own section div.
+- [x] `main.ts`'s settings tab is a pure shell: `display()` empties the container and
+      calls each registered tool's `settingsSection` — no turn-tracker-specific rows.
+- [x] `npx tsc --noEmit` clean, tests pass (220: +1 for the new source file under the
+      recursive hygiene scan), `npm run build` succeeds. **Manual vault smoke test pending
+      user verification** — every settings control reads/writes/persists (Obsidian runtime
+      can't be exercised here).
 
 ---
 

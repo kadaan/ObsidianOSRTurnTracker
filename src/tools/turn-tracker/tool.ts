@@ -46,6 +46,7 @@ import {
 } from "./model";
 import { renderTracker } from "./render";
 import { seedTrackerState } from "./seed";
+import { TurnTrackerSettingsSection } from "./settings-section";
 import { fenceTrackerBlock } from "./serialize";
 import { TrackerSuggest } from "./suggest";
 import { OsrTurnTrackerSettings } from "./settings";
@@ -86,6 +87,7 @@ class TurnTrackerTool {
       codec: trackerCodec,
       afterWrite: this.syncCalendarDay,
       commands: () => this.commands(),
+      settingsSection: (containerEl) => new TurnTrackerSettingsSection(this.host).render(containerEl),
       prepare: (state, note, backfill) => this.prepare(state, note, backfill),
       render: (ctx) => this.renderWidget(ctx),
     };
