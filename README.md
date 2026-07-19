@@ -1,15 +1,21 @@
 # OSR Tools
 
-An Obsidian plugin for running old-school dungeon exploration: track the 10-minute
-exploration turn, light sources, and timed effects right inside a note. Everything lives
-in a single ` ```osr-tools-turn-tracker ` code block whose YAML is the source of truth — no external
-scripts, themes, or JavaScript to enable.
+An Obsidian plugin with a set of tools for old-school (OSR) play, each rendered as its own
+code block whose YAML is the source of truth — no external scripts, themes, or JavaScript to
+enable:
+
+- **Turn Tracker** — the 10-minute exploration turn, light sources, timed effects, and in-game
+  dates (an `osr-tools-turn-tracker` block).
+- **Charge Tracker** — consumables with a limited number of uses, like wands, staves, and
+  rations (an `osr-tools-charge-tracker` block).
 
 > **Upgrading from the Templater version?** The original Templater / Meta-Bind build is
 > preserved at the [`v1.3-legacy`](../../releases/tag/v1.3-legacy) tag. This plugin
 > replaces it — you no longer need ITS Theme, Templater, Meta-Bind, or JS Engine.
 
 ## Features
+
+### Turn tracker
 
 - An `osr-tools-turn-tracker` code block that renders an interactive timeline: one box per turn,
   grouped into hour rows (6 turns) and day blocks (144 turns).
@@ -32,6 +38,20 @@ scripts, themes, or JavaScript to enable.
   plugin. Days are collapsible; the current day stays open.
 - Configurable presets, advance shortcuts, and look-ahead buffer in the settings tab.
 
+### Charge tracker
+
+- An `osr-tools-charge-tracker` code block: a named list of items, each with a current/max
+  charge count and a progress bar.
+- **Spend / restore** a charge with the − / + buttons, or **click the current or max number** to
+  set it exactly. **Click an item's name** to rename it.
+- **Add item** via the header button or the *Add item* command — name it and set its charges: a
+  plain number *or dice*, e.g. `2d6+1`, rolled when you add it. The item starts full.
+- **Exhausted items** (0 charges left) drop into a collapsed, dimmed list, mirroring the turn
+  tracker's expired effects; restore a charge to bring one back.
+- **Copy state** from the header's right-click menu to paste the tracker into another note.
+- **Commands and hotkeys**: *Create charge tracker* (always available) and *Add item* (acts on
+  the block at the cursor), both assignable to hotkeys.
+
 ## Installation
 
 ### Community plugins
@@ -52,6 +72,8 @@ Add this repository in the [BRAT](https://github.com/TfTHacker/obsidian42-brat) 
 track pre-release builds.
 
 ## Usage
+
+### Turn tracker
 
 Run the **Insert Turn Tracker** command (or type the block by hand) to drop a tracker:
 
@@ -81,11 +103,40 @@ anchoring it to "today" so date-sync works immediately. Then use the widget:
 The plugin rewrites the code block in place on each action, so the note always reflects the
 current state.
 
+### Charge tracker
+
+Run the **Create Charge Tracker** command (or type the block by hand) to drop a charge tracker:
+
+````markdown
+```osr-tools-charge-tracker
+items: []
+```
+````
+
+It starts empty ("No items yet — use *Add item…*"). Then use the widget:
+
+- **Add item…** — the button at the top right, or the *Add item* command (which acts on the
+  block your cursor is in). Prompts for a name and a charge count (a number or dice like
+  `2d6+1`, rolled when added); the item starts full. Press Cmd/Ctrl+Enter to accept.
+- **− / +** — spend or restore one charge. **Click the current or max number** to set it exactly
+  (lowering `max` below `current` pulls `current` down with it).
+- **Click an item's name** to rename it.
+- **Trash**, or **right-click a row → Remove** — delete an item (with a confirmation).
+- When an item reaches **0 charges** it moves into a collapsed **Exhausted** list; restore a
+  charge to bring it back to the active list.
+- **Right-click the header → Copy state** to paste the tracker into another note.
+
+Like the turn tracker, the block is rewritten in place on every action. The charge tracker is
+block-local — it has no settings.
+
 ## Configuration
 
-The code block's YAML *is* the tracker. You normally never edit it by hand — the widget
-rewrites it on every action — but every field is plain, human-editable YAML. A fully
-populated block looks like this:
+Each tool's code-block YAML *is* its state. You normally never edit it by hand — the widget
+rewrites it on every action — but every field is plain, human-editable YAML.
+
+### Turn tracker block
+
+A fully populated block looks like this:
 
 ````markdown
 ```osr-tools-turn-tracker
@@ -137,9 +188,38 @@ Each entry under `effects` is a marker:
 | `duration` | number | Burn length in active turns. The expiry turn is derived from `startsAt + duration` plus any paused span. Durations entered as dice (`2d6+1`) are rolled when the marker is added and stored as this final number. |
 | `pauses` | list | Pause/resume history: each `at` (turn paused) with an optional `until` (turn resumed; absent → still paused). |
 
+### Charge tracker block
+
+A named list of items, each with a current and maximum charge count:
+
+````markdown
+```osr-tools-charge-tracker
+items:
+  - name: Wand of Fireballs
+    current: 5
+    max: 7
+  - name: Staff of Healing
+    current: 0
+    max: 10
+```
+````
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `items` | list | The charged items. An empty list (`items: []`) renders the empty state. |
+
+Each entry under `items`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | The item's display name (must be non-empty). |
+| `current` | number | Charges remaining, a whole number in `0 … max`. Reaching `0` moves the item to the **Exhausted** list. |
+| `max` | number | Maximum charges — a whole number up to 1000. Lowering it below `current` pulls `current` down with it. |
+
 ### Settings
 
-The plugin's settings tab configures defaults shared by every tracker in the vault:
+The settings tab configures the **turn tracker** (the charge tracker is block-local and needs no
+configuration):
 
 - **Presets** — the light/effect buttons (Torch, Lantern, and any you add). Each has a
   name, an optional [Lucide](https://lucide.dev) icon, a duration (a number or dice like

@@ -33,9 +33,9 @@ function chargeCommands(host: ChargeTrackerHost): ToolCommand[] {
   return [
     {
       id: chargeCommandIds.create,
-      name: "Create charge tracker",
+      name: "Insert charge tracker",
       callback: () => {
-        const editor = requireActiveEditor(host.app, "create a charge tracker");
+        const editor = requireActiveEditor(host.app, "insert charge tracker");
         if (!editor) return;
         editor.replaceSelection(`${fenceBlock(CHARGE_LANG, serializeChargeState({ items: [] }))}\n`);
       },
